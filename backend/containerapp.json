@@ -1,0 +1,9 @@
+{
+  "name": "backend",
+  "targetPort": 3001,
+  "ingress": "external",
+  "cpu": "1.0",
+  "memory": "2.0Gi",
+  "minReplicas": 1,
+  "maxReplicas": 1
+}
