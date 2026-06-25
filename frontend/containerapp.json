@@ -1,0 +1,9 @@
+{
+  "name": "frontend",
+  "targetPort": 8080,
+  "ingress": "external",
+  "cpu": "0.25",
+  "memory": "0.5Gi",
+  "minReplicas": 1,
+  "maxReplicas": 1
+}

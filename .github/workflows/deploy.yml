@@ -1,0 +1,270 @@
+name: Deploy to Azure Container Apps
+
+on:
+  push:
+    branches: [main]
+    tags: ['makeinfra']
+  workflow_dispatch:
+
+env:
+  ACR_NAME: marketingparadiceacr
+  RESOURCE_GROUP: rg-marketing-nonprod
+  ENVIRONMENT: marketing-paradice-env
+
+jobs:
+  build-backend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - name: Build image
+        run: |
+          docker build -t ${{ env.ACR_NAME }}.azurecr.io/backend:${{ github.sha }} \
+            -f backend/Dockerfile backend/
+      - name: Save image
+        run: docker save ${{ env.ACR_NAME }}.azurecr.io/backend:${{ github.sha }} | gzip > /tmp/backend.tar.gz
+      - uses: actions/upload-artifact@v4
+        with:
+          name: backend-image
+          path: /tmp/backend.tar.gz
+          retention-days: 1
+
+  build-pyworker:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - name: Build image
+        run: |
+          docker build -t ${{ env.ACR_NAME }}.azurecr.io/pyworker:${{ github.sha }} \
+            -f pyworker/Dockerfile pyworker/
+      - name: Save image
+        run: docker save ${{ env.ACR_NAME }}.azurecr.io/pyworker:${{ github.sha }} | gzip > /tmp/pyworker.tar.gz
+      - uses: actions/upload-artifact@v4
+        with:
+          name: pyworker-image
+          path: /tmp/pyworker.tar.gz
+          retention-days: 1
+
+  build-frontend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - name: Build image
+        run: |
+          docker build -t ${{ env.ACR_NAME }}.azurecr.io/frontend:${{ github.sha }} \
+            -f frontend/Dockerfile frontend/
+      - name: Save image
+        run: docker save ${{ env.ACR_NAME }}.azurecr.io/frontend:${{ github.sha }} | gzip > /tmp/frontend.tar.gz
+      - uses: actions/upload-artifact@v4
+        with:
+          name: frontend-image
+          path: /tmp/frontend.tar.gz
+          retention-days: 1
+
+  make-infra:
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/makeinfra')
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Login to Azure
+        uses: azure/login@v3
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+      - name: Provision ACR
+        run: |
+          if az acr show --name ${{ env.ACR_NAME }} &>/dev/null; then
+            echo "ACR '${{ env.ACR_NAME }}' already exists, skipping."
+          else
+            echo "Creating ACR '${{ env.ACR_NAME }}'..."
+            az acr create \
+              --name ${{ env.ACR_NAME }} \
+              --resource-group ${{ env.RESOURCE_GROUP }} \
+              --sku Basic \
+              --admin-enabled true
+          fi
+
+      - name: Provision Container Apps environment
+        run: |
+          if az containerapp env show --name ${{ env.ENVIRONMENT }} --resource-group ${{ env.RESOURCE_GROUP }} &>/dev/null; then
+            echo "Environment '${{ env.ENVIRONMENT }}' already exists, skipping."
+          else
+            echo "Creating environment '${{ env.ENVIRONMENT }}'..."
+            az containerapp env create \
+              --name ${{ env.ENVIRONMENT }} \
+              --resource-group ${{ env.RESOURCE_GROUP }} \
+              --location swedencentral
+          fi
+
+      - name: Provision container apps
+        run: |
+          ACR_PASS=$(az acr credential show --name ${{ env.ACR_NAME }} --query "passwords[0].value" -o tsv)
+          for dir in backend pyworker frontend; do
+            CONFIG="$dir/containerapp.json"
+            NAME=$(jq -r '.name' "$CONFIG")
+            PORT=$(jq -r '.targetPort' "$CONFIG")
+            INGRESS=$(jq -r '.ingress' "$CONFIG")
+            CPU=$(jq -r '.cpu' "$CONFIG")
+            MEMORY=$(jq -r '.memory' "$CONFIG")
+            MIN=$(jq -r '.minReplicas' "$CONFIG")
+            MAX=$(jq -r '.maxReplicas' "$CONFIG")
+
+            if az containerapp show --name "$NAME" --resource-group ${{ env.RESOURCE_GROUP }} &>/dev/null; then
+              echo "Container app '$NAME' already exists, skipping."
+            else
+              echo "Creating container app '$NAME'..."
+              az containerapp create \
+                --name "$NAME" \
+                --resource-group ${{ env.RESOURCE_GROUP }} \
+                --environment ${{ env.ENVIRONMENT }} \
+                --image mcr.microsoft.com/k8se/quickstart:latest \
+                --registry-server ${{ env.ACR_NAME }}.azurecr.io \
+                --registry-username ${{ env.ACR_NAME }} \
+                --registry-password "$ACR_PASS" \
+                --target-port "$PORT" \
+                --ingress "$INGRESS" \
+                --min-replicas "$MIN" --max-replicas "$MAX" \
+                --cpu "$CPU" --memory "$MEMORY"
+            fi
+          done
+
+  push-backend:
+    runs-on: ubuntu-latest
+    needs: [build-backend, make-infra]
+    if: always() && needs.build-backend.result == 'success' && (needs.make-infra.result == 'success' || needs.make-infra.result == 'skipped')
+    steps:
+      - name: Login to Azure
+        uses: azure/login@v3
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+      - name: Login to ACR
+        run: az acr login --name ${{ env.ACR_NAME }}
+      - uses: actions/download-artifact@v4
+        with:
+          name: backend-image
+      - name: Push image
+        run: |
+          gunzip -c backend.tar.gz | docker load
+          docker tag ${{ env.ACR_NAME }}.azurecr.io/backend:${{ github.sha }} \
+                     ${{ env.ACR_NAME }}.azurecr.io/backend:latest
+          docker push ${{ env.ACR_NAME }}.azurecr.io/backend:${{ github.sha }}
+          docker push ${{ env.ACR_NAME }}.azurecr.io/backend:latest
+
+  push-pyworker:
+    runs-on: ubuntu-latest
+    needs: [build-pyworker, make-infra]
+    if: always() && needs.build-pyworker.result == 'success' && (needs.make-infra.result == 'success' || needs.make-infra.result == 'skipped')
+    steps:
+      - name: Login to Azure
+        uses: azure/login@v3
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+      - name: Login to ACR
+        run: az acr login --name ${{ env.ACR_NAME }}
+      - uses: actions/download-artifact@v4
+        with:
+          name: pyworker-image
+      - name: Push image
+        run: |
+          gunzip -c pyworker.tar.gz | docker load
+          docker tag ${{ env.ACR_NAME }}.azurecr.io/pyworker:${{ github.sha }} \
+                     ${{ env.ACR_NAME }}.azurecr.io/pyworker:latest
+          docker push ${{ env.ACR_NAME }}.azurecr.io/pyworker:${{ github.sha }}
+          docker push ${{ env.ACR_NAME }}.azurecr.io/pyworker:latest
+
+  push-frontend:
+    runs-on: ubuntu-latest
+    needs: [build-frontend, make-infra]
+    if: always() && needs.build-frontend.result == 'success' && (needs.make-infra.result == 'success' || needs.make-infra.result == 'skipped')
+    steps:
+      - name: Login to Azure
+        uses: azure/login@v3
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+      - name: Login to ACR
+        run: az acr login --name ${{ env.ACR_NAME }}
+      - uses: actions/download-artifact@v4
+        with:
+          name: frontend-image
+      - name: Push image
+        run: |
+          gunzip -c frontend.tar.gz | docker load
+          docker tag ${{ env.ACR_NAME }}.azurecr.io/frontend:${{ github.sha }} \
+                     ${{ env.ACR_NAME }}.azurecr.io/frontend:latest
+          docker push ${{ env.ACR_NAME }}.azurecr.io/frontend:${{ github.sha }}
+          docker push ${{ env.ACR_NAME }}.azurecr.io/frontend:latest
+
+  deploy-backend:
+    runs-on: ubuntu-latest
+    needs: [push-backend, make-infra]
+    if: always() && needs.push-backend.result == 'success' && (needs.make-infra.result == 'success' || needs.make-infra.result == 'skipped')
+    steps:
+      - name: Login to Azure
+        uses: azure/login@v3
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+      - name: Deploy backend
+        run: |
+          az containerapp update \
+            --name backend \
+            --resource-group ${{ env.RESOURCE_GROUP }} \
+            --image ${{ env.ACR_NAME }}.azurecr.io/backend:${{ github.sha }}
+
+  deploy-pyworker:
+    runs-on: ubuntu-latest
+    needs: [push-pyworker, make-infra]
+    if: always() && needs.push-pyworker.result == 'success' && (needs.make-infra.result == 'success' || needs.make-infra.result == 'skipped')
+    steps:
+      - name: Login to Azure
+        uses: azure/login@v3
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+      - name: Deploy pyworker
+        run: |
+          az containerapp update \
+            --name pyworker \
+            --resource-group ${{ env.RESOURCE_GROUP }} \
+            --image ${{ env.ACR_NAME }}.azurecr.io/pyworker:${{ github.sha }}
+
+  deploy-frontend:
+    runs-on: ubuntu-latest
+    needs: [push-frontend, make-infra]
+    if: always() && needs.push-frontend.result == 'success' && (needs.make-infra.result == 'success' || needs.make-infra.result == 'skipped')
+    steps:
+      - name: Login to Azure
+        uses: azure/login@v3
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+      - name: Deploy frontend
+        run: |
+          az containerapp update \
+            --name frontend \
+            --resource-group ${{ env.RESOURCE_GROUP }} \
+            --image ${{ env.ACR_NAME }}.azurecr.io/frontend:${{ github.sha }}
+
+  configure:
+    runs-on: ubuntu-latest
+    needs: [deploy-backend, deploy-pyworker, deploy-frontend]
+    if: always() && (needs.deploy-backend.result == 'success' || needs.deploy-pyworker.result == 'success' || needs.deploy-frontend.result == 'success')
+    steps:
+      - name: Login to Azure
+        uses: azure/login@v3
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+      - name: Configure service URLs
+        run: |
+          BACKEND_FQDN=$(az containerapp show --name backend --resource-group ${{ env.RESOURCE_GROUP }} --query 'properties.configuration.ingress.fqdn' -o tsv)
+          PYWORKER_FQDN=$(az containerapp show --name pyworker --resource-group ${{ env.RESOURCE_GROUP }} --query 'properties.configuration.ingress.fqdn' -o tsv)
+
+          echo "Setting BACKEND_URL on frontend to https://$BACKEND_FQDN"
+          az containerapp update \
+            --name frontend \
+            --resource-group ${{ env.RESOURCE_GROUP }} \
+            --set-env-vars "BACKEND_URL=https://$BACKEND_FQDN"
+
+          echo "Setting PYWORKER_URL on backend to https://$PYWORKER_FQDN"
+          az containerapp update \
+            --name backend \
+            --resource-group ${{ env.RESOURCE_GROUP }} \
+            --set-env-vars "PYWORKER_URL=https://$PYWORKER_FQDN"
+
