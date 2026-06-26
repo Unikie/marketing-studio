@@ -2,52 +2,57 @@ import { Router, Request, Response } from 'express';
 import path from 'path';
 import fs from 'fs';
 import { v4 as uuidv4 } from 'uuid';
-import Database from 'better-sqlite3';
+import type { Knex } from 'knex';
 
 const router = Router();
 
 // CREATE project
-router.post('/', (req: Request, res: Response) => {
-  const db = req.app.locals.db as Database.Database;
+router.post('/', async (req: Request, res: Response) => {
+  const db = req.app.locals.db as Knex;
   const id = uuidv4();
   const name = req.body.name || 'Untitled Project';
-  db.prepare('INSERT INTO projects (id, name) VALUES (?, ?)').run(id, name);
-  const project = db.prepare('SELECT * FROM projects WHERE id = ?').get(id);
+  await db('projects').insert({ id, name });
+  const project = await db('projects').where('id', id).first();
   res.status(201).json(project);
 });
 
 // LIST projects
-router.get('/', (req: Request, res: Response) => {
-  const db = req.app.locals.db as Database.Database;
-  const projects = db.prepare('SELECT * FROM projects ORDER BY created_at DESC LIMIT 50').all();
+router.get('/', async (req: Request, res: Response) => {
+  const db = req.app.locals.db as Knex;
+  const projects = await db('projects').orderBy('created_at', 'desc').limit(50);
   res.json(projects);
 });
 
 // GET single project with files
-router.get('/:id', (req: Request, res: Response) => {
-  const db = req.app.locals.db as Database.Database;
-  const project = db.prepare('SELECT * FROM projects WHERE id = ?').get(req.params.id);
+router.get('/:id', async (req: Request, res: Response) => {
+  const db = req.app.locals.db as Knex;
+  const project = await db('projects').where('id', req.params.id).first();
   if (!project) { res.status(404).json({ error: 'Project not found' }); return; }
 
-  const files = db.prepare('SELECT id, filename, name, analysis, created_at FROM files WHERE project_id = ? ORDER BY created_at').all(req.params.id);
-  res.json({ ...project as object, files });
+  const files = await db('files')
+    .select('id', 'filename', 'name', 'analysis', 'created_at')
+    .where('project_id', req.params.id)
+    .orderBy('created_at');
+  res.json({ ...project, files });
 });
 
 // DELETE project
-router.delete('/:id', (req: Request, res: Response) => {
-  const db = req.app.locals.db as Database.Database;
+router.delete('/:id', async (req: Request, res: Response) => {
+  const db = req.app.locals.db as Knex;
   const dataDir = req.app.locals.dataDir as string;
 
-  const files = db.prepare('SELECT filename FROM files WHERE project_id = ?').all(req.params.id) as { filename: string }[];
+  const files = await db('files').select('filename').where('project_id', req.params.id);
   for (const file of files) {
     const filePath = path.join(dataDir, 'uploads', file.filename);
     if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
   }
 
-  db.prepare('DELETE FROM prompt_context WHERE prompt_id IN (SELECT id FROM prompts WHERE project_id = ?)').run(req.params.id);
-  db.prepare('DELETE FROM prompts WHERE project_id = ?').run(req.params.id);
-  db.prepare('DELETE FROM files WHERE project_id = ?').run(req.params.id);
-  db.prepare('DELETE FROM projects WHERE id = ?').run(req.params.id);
+  await db('prompt_context')
+    .whereIn('prompt_id', db('prompts').select('id').where('project_id', req.params.id))
+    .del();
+  await db('prompts').where('project_id', req.params.id).del();
+  await db('files').where('project_id', req.params.id).del();
+  await db('projects').where('id', req.params.id).del();
   res.status(204).end();
 });
 

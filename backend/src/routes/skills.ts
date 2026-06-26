@@ -1,19 +1,19 @@
 import { Router, Request, Response } from 'express';
 import { v4 as uuidv4 } from 'uuid';
-import Database from 'better-sqlite3';
+import type { Knex } from 'knex';
 
 const router = Router();
 
 // LIST all skills
-router.get('/', (req: Request, res: Response) => {
-  const db = req.app.locals.db as Database.Database;
-  const skills = db.prepare('SELECT * FROM skills ORDER BY created_at').all();
+router.get('/', async (req: Request, res: Response) => {
+  const db = req.app.locals.db as Knex;
+  const skills = await db('skills').orderBy('created_at');
   res.json(skills);
 });
 
-// CREATE skill (immutable — creates a new entry)
-router.post('/', (req: Request, res: Response) => {
-  const db = req.app.locals.db as Database.Database;
+// CREATE skill
+router.post('/', async (req: Request, res: Response) => {
+  const db = req.app.locals.db as Knex;
   const id = uuidv4();
   const { name, description, system_prompt, tool_name } = req.body;
 
@@ -22,39 +22,33 @@ router.post('/', (req: Request, res: Response) => {
     return;
   }
 
-  db.prepare(
-    'INSERT INTO skills (id, name, description, system_prompt, tool_name) VALUES (?, ?, ?, ?, ?)'
-  ).run(id, name, description || '', system_prompt, tool_name || null);
-
-  const skill = db.prepare('SELECT * FROM skills WHERE id = ?').get(id);
+  await db('skills').insert({ id, name, description: description || '', system_prompt, tool_name: tool_name || null });
+  const skill = await db('skills').where('id', id).first();
   res.status(201).json(skill);
 });
 
 // UPDATE skill
-router.put('/:id', (req: Request, res: Response) => {
-  const db = req.app.locals.db as Database.Database;
+router.put('/:id', async (req: Request, res: Response) => {
+  const db = req.app.locals.db as Knex;
   const { name, description, system_prompt, tool_name } = req.body;
-  const existing = db.prepare('SELECT * FROM skills WHERE id = ?').get(req.params.id as string);
+  const existing = await db('skills').where('id', req.params.id).first();
   if (!existing) { res.status(404).json({ error: 'Skill not found' }); return; }
 
-  db.prepare(
-    'UPDATE skills SET name = ?, description = ?, system_prompt = ?, tool_name = ? WHERE id = ?'
-  ).run(
-    name ?? (existing as any).name,
-    description ?? (existing as any).description,
-    system_prompt ?? (existing as any).system_prompt,
-    tool_name !== undefined ? (tool_name || null) : (existing as any).tool_name,
-    req.params.id as string
-  );
+  await db('skills').where('id', req.params.id).update({
+    name: name ?? existing.name,
+    description: description ?? existing.description,
+    system_prompt: system_prompt ?? existing.system_prompt,
+    tool_name: tool_name !== undefined ? (tool_name || null) : existing.tool_name,
+  });
 
-  const skill = db.prepare('SELECT * FROM skills WHERE id = ?').get(req.params.id as string);
+  const skill = await db('skills').where('id', req.params.id).first();
   res.json(skill);
 });
 
 // DELETE skill
-router.delete('/:id', (req: Request, res: Response) => {
-  const db = req.app.locals.db as Database.Database;
-  db.prepare('DELETE FROM skills WHERE id = ?').run(req.params.id as string);
+router.delete('/:id', async (req: Request, res: Response) => {
+  const db = req.app.locals.db as Knex;
+  await db('skills').where('id', req.params.id).del();
   res.status(204).end();
 });
 

@@ -2,3 +2,5 @@ PyMuPDF
 python-pptx
 python-docx
 flask
+SQLAlchemy
+psycopg[binary]
