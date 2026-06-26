@@ -1,4 +1,4 @@
-import Database from 'better-sqlite3';
+import type { Knex } from 'knex';
 import { callLLMStream } from './llm';
 import { v4 as uuidv4 } from 'uuid';
 import fs from 'fs';
@@ -89,24 +89,22 @@ async function analyzeFileViaWorker(filePath: string, originalName: string): Pro
 
 // ----- Context unwinding -----
 
-function unwindContext(db: Database.Database, promptId: string): unknown[] {
+async function unwindContext(db: Knex, promptId: string): Promise<unknown[]> {
   const context: unknown[] = [];
   const visited = new Set<string>();
 
-  function walk(id: string) {
+  async function walk(id: string) {
     if (visited.has(id)) return;
     visited.add(id);
 
-    const refs = db.prepare(
-      "SELECT ref_type, ref_id FROM prompt_context WHERE prompt_id = ?"
-    ).all(id) as { ref_type: string; ref_id: string }[];
+    const refs = await db('prompt_context').select('ref_type', 'ref_id').where('prompt_id', id);
 
     for (const ref of refs) {
       if (ref.ref_type === 'prompt') {
-        const p = db.prepare('SELECT * FROM prompts WHERE id = ?').get(ref.ref_id) as PromptRow | undefined;
+        const p = await db('prompts').where('id', ref.ref_id).first() as PromptRow | undefined;
         if (p && p.status === 'completed') {
           // Recurse into this prompt's context first (depth-first)
-          walk(p.id);
+          await walk(p.id);
           const entry: { type: string; prompt?: string; response?: string } = { type: p.type };
           if (p.prompt) entry.prompt = p.prompt;
           if (p.response) entry.response = p.response;
@@ -116,23 +114,29 @@ function unwindContext(db: Database.Database, promptId: string): unknown[] {
     }
   }
 
-  walk(promptId);
+  await walk(promptId);
   return context;
 }
 
 // Collect project-level history (top-level completed prompts before this one)
-function getProjectContext(db: Database.Database, projectId: string, beforeDate: string): unknown[] {
-  const rows = db.prepare(
-    "SELECT * FROM prompts WHERE project_id = ? AND pipeline_id IS NULL AND status = 'completed' AND created_at < ? ORDER BY created_at"
-  ).all(projectId, beforeDate) as PromptRow[];
+async function getProjectContext(db: Knex, projectId: string, beforeDate: string): Promise<unknown[]> {
+  const rows = await db('prompts')
+    .where('project_id', projectId)
+    .whereNull('pipeline_id')
+    .where('status', 'completed')
+    .where('created_at', '<', beforeDate)
+    .orderBy('created_at') as PromptRow[];
 
   const context: unknown[] = [];
   for (const p of rows) {
     // For pipelines, get the last child's response
     if (p.type === 'pipeline') {
-      const lastChild = db.prepare(
-        "SELECT response FROM prompts WHERE pipeline_id = ? AND status = 'completed' ORDER BY created_at DESC LIMIT 1"
-      ).get(p.id) as { response: string } | undefined;
+      const lastChild = await db('prompts')
+        .select('response')
+        .where('pipeline_id', p.id)
+        .where('status', 'completed')
+        .orderBy('created_at', 'desc')
+        .first();
       if (lastChild) {
         context.push({ type: 'pipeline', prompt: p.prompt, response: lastChild.response });
       }
@@ -148,7 +152,7 @@ function getProjectContext(db: Database.Database, projectId: string, beforeDate:
 
 // ----- Processing logic -----
 
-function parsePrompt(prompt: string, db: Database.Database): { skills: SkillRow[]; userText: string } {
+function parsePrompt(prompt: string, db: Knex): { skillNames: string[]; userText: string; getSkills: () => Promise<{ skills: SkillRow[]; }> } {
   const skillPattern = /\/([a-zA-Z0-9_-]+)/g;
   const foundNames: string[] = [];
   let match;
@@ -156,24 +160,29 @@ function parsePrompt(prompt: string, db: Database.Database): { skills: SkillRow[
     foundNames.push(match[1].toLowerCase());
   }
 
-  const allSkills = db.prepare('SELECT * FROM skills').all() as SkillRow[];
-  const matchedSkills: SkillRow[] = [];
-  for (const name of foundNames) {
-    const skill = allSkills.find(s => s.name.toLowerCase() === name);
-    if (skill) matchedSkills.push(skill);
-  }
-
   const userText = prompt.replace(skillPattern, '').replace(/\s+/g, ' ').trim();
-  return { skills: matchedSkills, userText };
+  return {
+    skillNames: foundNames,
+    userText,
+    getSkills: async () => {
+      const allSkills = await db('skills').select('*') as SkillRow[];
+      const matchedSkills: SkillRow[] = [];
+      for (const name of foundNames) {
+        const skill = allSkills.find(s => s.name.toLowerCase() === name);
+        if (skill) matchedSkills.push(skill);
+      }
+      return { skills: matchedSkills };
+    },
+  };
 }
 
-function isCancelled(db: Database.Database, promptId: string): boolean {
-  const row = db.prepare('SELECT status FROM prompts WHERE id = ?').get(promptId) as { status: string } | undefined;
+async function isCancelled(db: Knex, promptId: string): Promise<boolean> {
+  const row = await db('prompts').select('status').where('id', promptId).first();
   return row?.status === 'cancel_requested';
 }
 
-function getSystemInstruction(db: Database.Database): { id: string; text: string } {
-  const row = db.prepare('SELECT id, text FROM system_instructions ORDER BY created_at DESC LIMIT 1').get() as { id: string; text: string } | undefined;
+async function getSystemInstruction(db: Knex): Promise<{ id: string; text: string }> {
+  const row = await db('system_instructions').select('id', 'text').orderBy('created_at', 'desc').first();
   return row || { id: 'default', text: '' };
 }
 
@@ -204,7 +213,7 @@ Rules:
 - If a required field cannot be determined from context, use a reasonable default.`;
 
 async function generateToolArgs(
-  db: Database.Database,
+  db: Knex,
   toolName: string,
   toolDescription: string,
   paramsSchema: unknown,
@@ -270,31 +279,31 @@ async function resolveFileArgs(args: Record<string, unknown>, files: FileRow[]):
 
 // ----- Main entry point -----
 
-export async function processPrompt(db: Database.Database, projectId: string, promptId: string): Promise<void> {
-  db.prepare("UPDATE prompts SET status = 'processing', updated_at = datetime('now') WHERE id = ?").run(promptId);
+export async function processPrompt(db: Knex, projectId: string, promptId: string): Promise<void> {
+  await db('prompts').where('id', promptId).update({ status: 'processing', updated_at: db.fn.now() });
   broadcast(projectId, { type: 'prompt-status', promptId, status: 'processing' });
 
-  const currentPrompt = db.prepare('SELECT * FROM prompts WHERE id = ?').get(promptId) as PromptRow | undefined;
+  const currentPrompt = await db('prompts').where('id', promptId).first() as PromptRow | undefined;
   if (!currentPrompt) return;
 
   const abortController = new AbortController();
   activeAbortControllers.set(promptId, abortController);
 
   try {
-    const { skills, userText } = parsePrompt(currentPrompt.prompt, db);
-    const sysInstruction = getSystemInstruction(db);
+    const parsed = parsePrompt(currentPrompt.prompt, db);
+    const { skills } = await parsed.getSkills();
+    const userText = parsed.userText;
+    const sysInstruction = await getSystemInstruction(db);
 
     // Store system_instruction_id reference
-    db.prepare("UPDATE prompts SET system_instruction_id = ? WHERE id = ?").run(sysInstruction.id, promptId);
+    await db('prompts').where('id', promptId).update({ system_instruction_id: sysInstruction.id });
 
     // Get files attached to this prompt (via prompt_context file refs)
-    const fileRefs = db.prepare(
-      "SELECT ref_id FROM prompt_context WHERE prompt_id = ? AND ref_type = 'file'"
-    ).all(promptId) as { ref_id: string }[];
+    const fileRefs = await db('prompt_context').select('ref_id').where('prompt_id', promptId).where('ref_type', 'file');
 
     const files: FileRow[] = [];
     for (const ref of fileRefs) {
-      const f = db.prepare('SELECT * FROM files WHERE id = ?').get(ref.ref_id) as FileRow | undefined;
+      const f = await db('files').where('id', ref.ref_id).first() as FileRow | undefined;
       if (f) files.push(f);
     }
 
@@ -303,11 +312,11 @@ export async function processPrompt(db: Database.Database, projectId: string, pr
     const needsPipeline = hasFiles || hasSkills;
 
     // --- Project-level context (previous top-level prompts) ---
-    const projectContext = getProjectContext(db, projectId, currentPrompt.created_at);
+    const projectContext = await getProjectContext(db, projectId, currentPrompt.created_at);
 
     if (!needsPipeline && !userText) {
       // Nothing to process
-      db.prepare("UPDATE prompts SET status = 'completed', updated_at = datetime('now') WHERE id = ?").run(promptId);
+      await db('prompts').where('id', promptId).update({ status: 'completed', updated_at: db.fn.now() });
       broadcast(projectId, { type: 'prompt-status', promptId, status: 'completed' });
       return;
     }
@@ -317,45 +326,46 @@ export async function processPrompt(db: Database.Database, projectId: string, pr
       const context = projectContext;
       const msgs = buildMessages({ systemPrompt: sysInstruction.text, context, userContent: userText });
 
-      db.prepare("UPDATE prompts SET messages = ?, updated_at = datetime('now') WHERE id = ?").run(JSON.stringify(msgs), promptId);
+      await db('prompts').where('id', promptId).update({ messages: JSON.stringify(msgs), updated_at: db.fn.now() });
 
       let fullContent = '';
-      await callLLMStream(msgs, (chunk: string) => {
+      await callLLMStream(msgs, async (chunk: string) => {
         fullContent += chunk;
-        db.prepare("UPDATE prompts SET response = ?, updated_at = datetime('now') WHERE id = ?").run(fullContent, promptId);
+        await db('prompts').where('id', promptId).update({ response: fullContent, updated_at: db.fn.now() });
         broadcast(projectId, { type: 'prompt-chunk', promptId, chunk, fullContent });
-        if (isCancelled(db, promptId)) abortController.abort();
+        if (await isCancelled(db, promptId)) abortController.abort();
       }, abortController.signal);
 
-      db.prepare("UPDATE prompts SET response = ?, status = 'completed', updated_at = datetime('now') WHERE id = ?").run(fullContent, promptId);
+      await db('prompts').where('id', promptId).update({ response: fullContent, status: 'completed', updated_at: db.fn.now() });
       broadcast(projectId, { type: 'prompt-status', promptId, status: 'completed', fullContent });
       return;
     }
 
     // ===== PIPELINE (has files OR skills) =====
-    db.prepare("UPDATE prompts SET type = 'pipeline', updated_at = datetime('now') WHERE id = ?").run(promptId);
+    await db('prompts').where('id', promptId).update({ type: 'pipeline', updated_at: db.fn.now() });
 
     let lastChildId: string | null = null;
 
     // Step 1: Tool calls for each file (only if files attached)
     if (hasFiles) {
       for (const file of files) {
-        if (abortController.signal.aborted || isCancelled(db, promptId)) throw new Error('AbortError');
+        if (abortController.signal.aborted || await isCancelled(db, promptId)) throw new Error('AbortError');
 
         const toolId = uuidv4();
         const filePath = path.resolve(dataDir, 'uploads', file.filename);
         const analysis = await analyzeFileViaWorker(filePath, file.name);
         const analysisJson = JSON.stringify(analysis);
 
-        db.prepare("UPDATE files SET analysis = ? WHERE id = ?").run(analysisJson, file.id);
+        await db('files').where('id', file.id).update({ analysis: analysisJson });
 
-        db.prepare(
-          "INSERT INTO prompts (id, project_id, pipeline_id, type, prompt, response, system_instruction_id, status) VALUES (?, ?, ?, 'tool', ?, ?, ?, 'completed')"
-        ).run(toolId, projectId, promptId, file.name, analysisJson, sysInstruction.id);
+        await db('prompts').insert({
+          id: toolId, project_id: projectId, pipeline_id: promptId, type: 'tool',
+          prompt: file.name, response: analysisJson, system_instruction_id: sysInstruction.id, status: 'completed',
+        });
 
-        db.prepare("INSERT INTO prompt_context (prompt_id, ref_type, ref_id) VALUES (?, 'file', ?)").run(toolId, file.id);
+        await db('prompt_context').insert({ prompt_id: toolId, ref_type: 'file', ref_id: file.id });
         if (lastChildId) {
-          db.prepare("INSERT INTO prompt_context (prompt_id, ref_type, ref_id) VALUES (?, 'prompt', ?)").run(toolId, lastChildId);
+          await db('prompt_context').insert({ prompt_id: toolId, ref_type: 'prompt', ref_id: lastChildId });
         }
 
         broadcast(projectId, { type: 'prompt-status', promptId: toolId, status: 'completed' });
@@ -366,7 +376,7 @@ export async function processPrompt(db: Database.Database, projectId: string, pr
     // Step 2: Skill LLM calls (only if skills in prompt)
     if (hasSkills) {
       for (const skill of skills) {
-        if (abortController.signal.aborted || isCancelled(db, promptId)) throw new Error('AbortError');
+        if (abortController.signal.aborted || await isCancelled(db, promptId)) throw new Error('AbortError');
 
         // --- If skill has a tool, run arg generation + tool execution first ---
         if (skill.tool_name) {
@@ -374,24 +384,24 @@ export async function processPrompt(db: Database.Database, projectId: string, pr
           const { params_schema, description: toolDesc, error: schemaError } = await getToolSchema(skill.tool_name);
 
           if (schemaError) {
-            // Tool not found or unreachable — fail this step
-            db.prepare(
-              "INSERT INTO prompts (id, project_id, pipeline_id, type, prompt, response, skill_id, system_instruction_id, status, error) VALUES (?, ?, ?, 'tool', ?, ?, ?, ?, 'error', ?)"
-            ).run(toolCallId, projectId, promptId, `${skill.tool_name} (arg-gen)`, '', skill.id, sysInstruction.id, schemaError);
+            await db('prompts').insert({
+              id: toolCallId, project_id: projectId, pipeline_id: promptId, type: 'tool',
+              prompt: `${skill.tool_name} (arg-gen)`, response: '', skill_id: skill.id,
+              system_instruction_id: sysInstruction.id, status: 'error', error: schemaError,
+            });
             if (lastChildId) {
-              db.prepare("INSERT INTO prompt_context (prompt_id, ref_type, ref_id) VALUES (?, 'prompt', ?)").run(toolCallId, lastChildId);
+              await db('prompt_context').insert({ prompt_id: toolCallId, ref_type: 'prompt', ref_id: lastChildId });
             }
             broadcast(projectId, { type: 'prompt-status', promptId: toolCallId, status: 'error', error: schemaError });
             lastChildId = toolCallId;
-            continue; // skip this skill entirely
+            continue;
           }
 
           // Generate args via LLM
           const argGenId = uuidv4();
-          const chainContextForArgs = lastChildId ? unwindContext(db, lastChildId) : [];
-          // Include the lastChild itself in context (unwindContext gets its ancestors, not itself)
+          const chainContextForArgs = lastChildId ? await unwindContext(db, lastChildId) : [];
           if (lastChildId) {
-            const lastChildRow = db.prepare('SELECT * FROM prompts WHERE id = ?').get(lastChildId) as PromptRow | undefined;
+            const lastChildRow = await db('prompts').where('id', lastChildId).first() as PromptRow | undefined;
             if (lastChildRow && lastChildRow.status === 'completed') {
               const entry: { type: string; prompt?: string; response?: string } = { type: lastChildRow.type };
               if (lastChildRow.prompt) entry.prompt = lastChildRow.prompt;
@@ -404,22 +414,27 @@ export async function processPrompt(db: Database.Database, projectId: string, pr
             db, skill.tool_name, toolDesc, params_schema, contextForArgs, userText, files
           );
 
-          // Store arg generation as visible step
           const argGenPrompt = JSON.stringify({ tool: skill.tool_name, description: toolDesc, schema: params_schema });
-          db.prepare(
-            "INSERT INTO prompts (id, project_id, pipeline_id, type, prompt, response, messages, skill_id, system_instruction_id, status) VALUES (?, ?, ?, 'llm', ?, ?, ?, ?, ?, ?)"
-          ).run(argGenId, projectId, promptId, argGenPrompt, JSON.stringify(args || argError), JSON.stringify(argGenMsgs), skill.id, sysInstruction.id, argError ? 'error' : 'completed');
+          await db('prompts').insert({
+            id: argGenId, project_id: projectId, pipeline_id: promptId, type: 'llm',
+            prompt: argGenPrompt, response: JSON.stringify(args || argError),
+            messages: JSON.stringify(argGenMsgs), skill_id: skill.id,
+            system_instruction_id: sysInstruction.id, status: argError ? 'error' : 'completed',
+          });
           if (lastChildId) {
-            db.prepare("INSERT INTO prompt_context (prompt_id, ref_type, ref_id) VALUES (?, 'prompt', ?)").run(argGenId, lastChildId);
+            await db('prompt_context').insert({ prompt_id: argGenId, ref_type: 'prompt', ref_id: lastChildId });
           }
           broadcast(projectId, { type: 'prompt-status', promptId: argGenId, status: argError ? 'error' : 'completed' });
           lastChildId = argGenId;
 
           if (argError || !args) {
-            db.prepare(
-              "INSERT INTO prompts (id, project_id, pipeline_id, type, prompt, response, skill_id, system_instruction_id, status, error) VALUES (?, ?, ?, 'tool', ?, ?, ?, ?, 'error', ?)"
-            ).run(toolCallId, projectId, promptId, `${skill.tool_name}`, JSON.stringify({ attempted_args: args }), skill.id, sysInstruction.id, argError || 'Failed to generate tool arguments');
-            db.prepare("INSERT INTO prompt_context (prompt_id, ref_type, ref_id) VALUES (?, 'prompt', ?)").run(toolCallId, lastChildId);
+            await db('prompts').insert({
+              id: toolCallId, project_id: projectId, pipeline_id: promptId, type: 'tool',
+              prompt: `${skill.tool_name}`, response: JSON.stringify({ attempted_args: args }),
+              skill_id: skill.id, system_instruction_id: sysInstruction.id,
+              status: 'error', error: argError || 'Failed to generate tool arguments',
+            });
+            await db('prompt_context').insert({ prompt_id: toolCallId, ref_type: 'prompt', ref_id: lastChildId });
             broadcast(projectId, { type: 'prompt-status', promptId: toolCallId, status: 'error', error: argError });
             lastChildId = toolCallId;
             continue;
@@ -432,7 +447,6 @@ export async function processPrompt(db: Database.Database, projectId: string, pr
           const toolResult = await executeToolViaWorker(skill.tool_name, resolvedArgs);
           const toolResultJson = JSON.stringify(toolResult);
 
-          // Store which args were file-resolved
           const resolvedInfo = Object.keys(resolvedArgs).reduce((acc, k) => {
             if (typeof resolvedArgs[k] === 'string' && resolvedArgs[k] !== (args as any)[k]) {
               acc[k] = '[base64 file content]';
@@ -442,89 +456,94 @@ export async function processPrompt(db: Database.Database, projectId: string, pr
             return acc;
           }, {} as Record<string, unknown>);
 
-          db.prepare(
-            "INSERT INTO prompts (id, project_id, pipeline_id, type, prompt, response, skill_id, system_instruction_id, status) VALUES (?, ?, ?, 'tool', ?, ?, ?, ?, 'completed')"
-          ).run(toolCallId, projectId, promptId, `${skill.tool_name} ${JSON.stringify(resolvedInfo)}`, toolResultJson, skill.id, sysInstruction.id);
-          db.prepare("INSERT INTO prompt_context (prompt_id, ref_type, ref_id) VALUES (?, 'prompt', ?)").run(toolCallId, lastChildId);
+          await db('prompts').insert({
+            id: toolCallId, project_id: projectId, pipeline_id: promptId, type: 'tool',
+            prompt: `${skill.tool_name} ${JSON.stringify(resolvedInfo)}`, response: toolResultJson,
+            skill_id: skill.id, system_instruction_id: sysInstruction.id, status: 'completed',
+          });
+          await db('prompt_context').insert({ prompt_id: toolCallId, ref_type: 'prompt', ref_id: lastChildId });
           broadcast(projectId, { type: 'prompt-status', promptId: toolCallId, status: 'completed' });
           lastChildId = toolCallId;
         }
 
         // --- Skill LLM call (always runs) ---
-        if (abortController.signal.aborted || isCancelled(db, promptId)) throw new Error('AbortError');
+        if (abortController.signal.aborted || await isCancelled(db, promptId)) throw new Error('AbortError');
 
         const skillPromptId = uuidv4();
-        db.prepare(
-          "INSERT INTO prompts (id, project_id, pipeline_id, type, prompt, skill_id, system_instruction_id, status) VALUES (?, ?, ?, 'llm', ?, ?, ?, 'processing')"
-        ).run(skillPromptId, projectId, promptId, skill.system_prompt, skill.id, sysInstruction.id);
+        await db('prompts').insert({
+          id: skillPromptId, project_id: projectId, pipeline_id: promptId, type: 'llm',
+          prompt: skill.system_prompt, skill_id: skill.id,
+          system_instruction_id: sysInstruction.id, status: 'processing',
+        });
 
         if (lastChildId) {
-          db.prepare("INSERT INTO prompt_context (prompt_id, ref_type, ref_id) VALUES (?, 'prompt', ?)").run(skillPromptId, lastChildId);
+          await db('prompt_context').insert({ prompt_id: skillPromptId, ref_type: 'prompt', ref_id: lastChildId });
         }
 
         broadcast(projectId, { type: 'prompt-status', promptId: skillPromptId, status: 'processing' });
 
-        const chainContext = unwindContext(db, skillPromptId).map((c: any) => ({ ...c, _current: true }));
+        const chainContext = (await unwindContext(db, skillPromptId)).map((c: any) => ({ ...c, _current: true }));
         const fullContext = [...projectContext, ...chainContext];
         const systemPrompt = sysInstruction.text;
         const msgs = buildMessages({ systemPrompt, context: fullContext, userContent: skill.system_prompt });
 
-        db.prepare("UPDATE prompts SET messages = ?, updated_at = datetime('now') WHERE id = ?").run(JSON.stringify(msgs), skillPromptId);
+        await db('prompts').where('id', skillPromptId).update({ messages: JSON.stringify(msgs), updated_at: db.fn.now() });
 
         let output = '';
-        await callLLMStream(msgs, (chunk: string) => {
+        await callLLMStream(msgs, async (chunk: string) => {
           output += chunk;
           broadcast(projectId, { type: 'prompt-chunk', promptId: skillPromptId, chunk, fullContent: output });
-          if (isCancelled(db, promptId)) abortController.abort();
+          if (await isCancelled(db, promptId)) abortController.abort();
         }, abortController.signal);
 
-        db.prepare("UPDATE prompts SET response = ?, status = 'completed', updated_at = datetime('now') WHERE id = ?").run(output, skillPromptId);
+        await db('prompts').where('id', skillPromptId).update({ response: output, status: 'completed', updated_at: db.fn.now() });
         broadcast(projectId, { type: 'prompt-status', promptId: skillPromptId, status: 'completed' });
         lastChildId = skillPromptId;
       }
     }
 
     // Step 3: Final LLM — the user's actual prompt with full context
-    if (abortController.signal.aborted || isCancelled(db, promptId)) throw new Error('AbortError');
+    if (abortController.signal.aborted || await isCancelled(db, promptId)) throw new Error('AbortError');
 
     const finalId = uuidv4();
-    db.prepare(
-      "INSERT INTO prompts (id, project_id, pipeline_id, type, prompt, system_instruction_id, status) VALUES (?, ?, ?, 'llm', ?, ?, 'processing')"
-    ).run(finalId, projectId, promptId, currentPrompt.prompt, sysInstruction.id);
+    await db('prompts').insert({
+      id: finalId, project_id: projectId, pipeline_id: promptId, type: 'llm',
+      prompt: currentPrompt.prompt, system_instruction_id: sysInstruction.id, status: 'processing',
+    });
 
     if (lastChildId) {
-      db.prepare("INSERT INTO prompt_context (prompt_id, ref_type, ref_id) VALUES (?, 'prompt', ?)").run(finalId, lastChildId);
+      await db('prompt_context').insert({ prompt_id: finalId, ref_type: 'prompt', ref_id: lastChildId });
     }
 
     broadcast(projectId, { type: 'prompt-status', promptId: finalId, status: 'processing' });
 
-    const chainContext = unwindContext(db, finalId).map((c: any) => ({ ...c, _current: true }));
+    const chainContext = (await unwindContext(db, finalId)).map((c: any) => ({ ...c, _current: true }));
     const fullContext = [...projectContext, ...chainContext];
     const msgs = buildMessages({ systemPrompt: sysInstruction.text, context: fullContext, userContent: currentPrompt.prompt });
 
-    db.prepare("UPDATE prompts SET messages = ?, updated_at = datetime('now') WHERE id = ?").run(JSON.stringify(msgs), finalId);
+    await db('prompts').where('id', finalId).update({ messages: JSON.stringify(msgs), updated_at: db.fn.now() });
 
     let finalOutput = '';
-    await callLLMStream(msgs, (chunk: string) => {
+    await callLLMStream(msgs, async (chunk: string) => {
       finalOutput += chunk;
       broadcast(projectId, { type: 'prompt-chunk', promptId: finalId, chunk, fullContent: finalOutput });
-      if (isCancelled(db, promptId)) abortController.abort();
+      if (await isCancelled(db, promptId)) abortController.abort();
     }, abortController.signal);
 
-    db.prepare("UPDATE prompts SET response = ?, status = 'completed', updated_at = datetime('now') WHERE id = ?").run(finalOutput, finalId);
+    await db('prompts').where('id', finalId).update({ response: finalOutput, status: 'completed', updated_at: db.fn.now() });
     broadcast(projectId, { type: 'prompt-status', promptId: finalId, status: 'completed' });
 
     // Pipeline parent done
-    db.prepare("UPDATE prompts SET status = 'completed', updated_at = datetime('now') WHERE id = ?").run(promptId);
+    await db('prompts').where('id', promptId).update({ status: 'completed', updated_at: db.fn.now() });
     broadcast(projectId, { type: 'prompt-status', promptId, status: 'completed' });
 
   } catch (err: any) {
     if (err.name === 'AbortError' || err.message === 'AbortError' || abortController.signal.aborted) {
-      db.prepare("UPDATE prompts SET status = 'stopped', updated_at = datetime('now') WHERE id = ?").run(promptId);
+      await db('prompts').where('id', promptId).update({ status: 'stopped', updated_at: db.fn.now() });
       broadcast(projectId, { type: 'prompt-status', promptId, status: 'stopped' });
     } else {
       const errorMsg = err.message || 'Unknown error';
-      db.prepare("UPDATE prompts SET status = 'error', error = ?, updated_at = datetime('now') WHERE id = ?").run(errorMsg, promptId);
+      await db('prompts').where('id', promptId).update({ status: 'error', error: errorMsg, updated_at: db.fn.now() });
       broadcast(projectId, { type: 'prompt-status', promptId, status: 'error', error: errorMsg });
     }
   } finally {

@@ -3,7 +3,7 @@ import multer from 'multer';
 import path from 'path';
 import fs from 'fs';
 import { v4 as uuidv4 } from 'uuid';
-import Database from 'better-sqlite3';
+import type { Knex } from 'knex';
 
 const router = Router({ mergeParams: true });
 
@@ -40,29 +40,31 @@ const upload = multer({
 });
 
 // LIST files for a project
-router.get('/', (req: Request, res: Response) => {
-  const db = req.app.locals.db as Database.Database;
+router.get('/', async (req: Request, res: Response) => {
+  const db = req.app.locals.db as Knex;
   const projectId = req.params.projectId as string;
-  const files = db.prepare('SELECT id, filename, name, analysis, created_at FROM files WHERE project_id = ? ORDER BY created_at').all(projectId);
+  const files = await db('files')
+    .select('id', 'filename', 'name', 'analysis', 'created_at')
+    .where('project_id', projectId)
+    .orderBy('created_at');
   res.json(files);
 });
 
 // UPLOAD files
-router.post('/', upload.array('files', 10), (req: Request, res: Response) => {
-  const db = req.app.locals.db as Database.Database;
+router.post('/', upload.array('files', 10), async (req: Request, res: Response) => {
+  const db = req.app.locals.db as Knex;
   const projectId = req.params.projectId as string;
 
-  const project = db.prepare('SELECT id FROM projects WHERE id = ?').get(projectId);
+  const project = await db('projects').where('id', projectId).first();
   if (!project) { res.status(404).json({ error: 'Project not found' }); return; }
 
   const files = req.files as Express.Multer.File[];
   if (!files || files.length === 0) { res.status(400).json({ error: 'No files uploaded' }); return; }
 
-  const insertFile = db.prepare('INSERT INTO files (id, project_id, filename, name) VALUES (?, ?, ?, ?)');
   const results = [];
   for (const file of files) {
     const fileId = uuidv4();
-    insertFile.run(fileId, projectId, file.filename, file.originalname);
+    await db('files').insert({ id: fileId, project_id: projectId, filename: file.filename, name: file.originalname });
     results.push({ id: fileId, filename: file.filename, name: file.originalname });
   }
 
@@ -70,18 +72,18 @@ router.post('/', upload.array('files', 10), (req: Request, res: Response) => {
 });
 
 // DELETE a file
-router.delete('/:fileId', (req: Request, res: Response) => {
-  const db = req.app.locals.db as Database.Database;
+router.delete('/:fileId', async (req: Request, res: Response) => {
+  const db = req.app.locals.db as Knex;
   const dataDir = req.app.locals.dataDir as string;
   const fileId = req.params.fileId as string;
 
-  const file = db.prepare('SELECT filename FROM files WHERE id = ?').get(fileId) as { filename: string } | undefined;
+  const file = await db('files').select('filename').where('id', fileId).first();
   if (!file) { res.status(404).json({ error: 'File not found' }); return; }
 
   const filePath = path.join(dataDir, 'uploads', file.filename);
   if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
 
-  db.prepare('DELETE FROM files WHERE id = ?').run(fileId);
+  await db('files').where('id', fileId).del();
   res.status(204).end();
 });
 

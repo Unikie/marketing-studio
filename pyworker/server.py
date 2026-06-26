@@ -11,18 +11,49 @@ import tempfile
 import traceback
 
 from flask import Flask, request, jsonify, g
+from sqlalchemy import Column, DateTime, Integer, MetaData, Table, Text, create_engine, delete, func, insert, inspect, select, text, update
 
 app = Flask(__name__)
 
+DATABASE_URL = os.environ.get('DATABASE_URL', '')
 DB_PATH = os.environ.get('PYWORKER_DB', os.path.join(os.path.dirname(__file__), 'tools.db'))
+
+def get_database_url():
+    if DATABASE_URL.startswith('postgres'):
+        if DATABASE_URL.startswith('postgres://'):
+            return DATABASE_URL.replace('postgres://', 'postgresql+psycopg://', 1)
+        if DATABASE_URL.startswith('postgresql://'):
+            return DATABASE_URL.replace('postgresql://', 'postgresql+psycopg://', 1)
+        return DATABASE_URL
+    return f'sqlite:///{DB_PATH}'
+
+DB_DRIVER = 'postgres' if DATABASE_URL.startswith('postgres') else 'sqlite'
+engine = create_engine(
+    get_database_url(),
+    connect_args={'check_same_thread': False} if DB_DRIVER == 'sqlite' else {},
+    future=True,
+)
+
+metadata = MetaData()
+tools_table = Table(
+    'tools',
+    metadata,
+    Column('name', Text, primary_key=True),
+    Column('description', Text),
+    Column('code', Text, nullable=False),
+    Column('params_schema', Text),
+    Column('owner', Text, default='system', server_default='system'),
+    Column('read_only', Integer, default=0, server_default='0'),
+    Column('permissions', Text, default='{}', server_default='{}'),
+    Column('created_at', DateTime, server_default=func.now()),
+    Column('updated_at', DateTime, server_default=func.now()),
+)
 
 # ---- Database ----
 
 def get_db():
     if 'db' not in g:
-        g.db = sqlite3.connect(DB_PATH)
-        g.db.row_factory = sqlite3.Row
-        g.db.execute('PRAGMA journal_mode=WAL')
+        g.db = engine.connect()
     return g.db
 
 @app.teardown_appcontext
@@ -31,26 +62,25 @@ def close_db(exc):
     if db:
         db.close()
 
+def row_to_dict(row):
+    if not row:
+        return None
+    result = dict(row)
+    for key, value in result.items():
+        if hasattr(value, 'isoformat'):
+            result[key] = value.isoformat()
+    return result
+
 def init_db():
-    db = sqlite3.connect(DB_PATH)
-    db.execute('''CREATE TABLE IF NOT EXISTS tools (
-        name TEXT PRIMARY KEY,
-        description TEXT,
-        code TEXT NOT NULL,
-        params_schema TEXT,
-        owner TEXT DEFAULT 'system',
-        read_only INTEGER DEFAULT 0,
-        permissions TEXT DEFAULT '{}',
-        created_at TEXT DEFAULT (datetime('now')),
-        updated_at TEXT DEFAULT (datetime('now'))
-    )''')
-    # Migration: add params_schema if missing
-    try:
-        db.execute('SELECT params_schema FROM tools LIMIT 1')
-    except sqlite3.OperationalError:
-        db.execute('ALTER TABLE tools ADD COLUMN params_schema TEXT')
-    db.commit()
-    db.close()
+    metadata.create_all(engine)
+    if DB_DRIVER == 'sqlite':
+        with engine.connect() as db:
+            db.execute(text('PRAGMA journal_mode=WAL'))
+
+    columns = [column['name'] for column in inspect(engine).get_columns('tools')]
+    if 'params_schema' not in columns:
+        with engine.begin() as db:
+            db.execute(text('ALTER TABLE tools ADD COLUMN params_schema TEXT'))
 
 # ---- Permission helpers ----
 
@@ -59,10 +89,8 @@ def get_caller():
     return request.headers.get('X-Caller', 'anonymous')
 
 def get_tool_or_404(name):
-    row = get_db().execute('SELECT * FROM tools WHERE name = ?', (name,)).fetchone()
-    if not row:
-        return None
-    return dict(row)
+    row = get_db().execute(select(tools_table).where(tools_table.c.name == name)).mappings().fetchone()
+    return row_to_dict(row)
 
 def check_permission(tool, action):
     """Check if caller has permission for action (create/read/update/delete/execute)."""
@@ -79,8 +107,18 @@ def check_permission(tool, action):
 
 @app.route('/tools', methods=['GET'])
 def list_tools():
-    rows = get_db().execute('SELECT name, description, params_schema, owner, read_only, created_at, updated_at FROM tools').fetchall()
-    return jsonify([dict(r) for r in rows])
+    rows = get_db().execute(
+        select(
+            tools_table.c.name,
+            tools_table.c.description,
+            tools_table.c.params_schema,
+            tools_table.c.owner,
+            tools_table.c.read_only,
+            tools_table.c.created_at,
+            tools_table.c.updated_at,
+        )
+    ).mappings().fetchall()
+    return jsonify([row_to_dict(r) for r in rows])
 
 @app.route('/tools', methods=['POST'])
 def create_tool():
@@ -89,14 +127,21 @@ def create_tool():
         return jsonify({'error': 'name and code required'}), 400
 
     name = data['name']
-    existing = get_db().execute('SELECT name FROM tools WHERE name = ?', (name,)).fetchone()
+    existing = get_db().execute(select(tools_table.c.name).where(tools_table.c.name == name)).fetchone()
     if existing:
         return jsonify({'error': f'Tool "{name}" already exists'}), 409
 
     caller = get_caller()
     get_db().execute(
-        'INSERT INTO tools (name, description, code, params_schema, owner, read_only, permissions) VALUES (?, ?, ?, ?, ?, ?, ?)',
-        (name, data.get('description', ''), data['code'], data.get('params_schema'), caller, int(data.get('read_only', False)), json.dumps(data.get('permissions', {})))
+        insert(tools_table).values(
+            name=name,
+            description=data.get('description', ''),
+            code=data['code'],
+            params_schema=data.get('params_schema'),
+            owner=caller,
+            read_only=int(data.get('read_only', False)),
+            permissions=json.dumps(data.get('permissions', {})),
+        )
     )
     get_db().commit()
     return jsonify({'ok': True, 'name': name}), 201
@@ -122,21 +167,16 @@ def update_tool(name):
     if not data:
         return jsonify({'error': 'No data'}), 400
 
-    sets = []
-    params = []
+    values = {}
     if 'code' in data:
-        sets.append('code = ?')
-        params.append(data['code'])
+        values['code'] = data['code']
     if 'description' in data:
-        sets.append('description = ?')
-        params.append(data['description'])
+        values['description'] = data['description']
     if 'params_schema' in data:
-        sets.append('params_schema = ?')
-        params.append(data['params_schema'])
-    if sets:
-        sets.append("updated_at = datetime('now')")
-        params.append(name)
-        get_db().execute(f"UPDATE tools SET {', '.join(sets)} WHERE name = ?", params)
+        values['params_schema'] = data['params_schema']
+    if values:
+        values['updated_at'] = func.now()
+        get_db().execute(update(tools_table).where(tools_table.c.name == name).values(**values))
         get_db().commit()
     return jsonify({'ok': True})
 
@@ -148,7 +188,7 @@ def delete_tool(name):
     if not check_permission(tool, 'delete'):
         return jsonify({'error': 'Forbidden'}), 403
 
-    get_db().execute('DELETE FROM tools WHERE name = ?', (name,))
+    get_db().execute(delete(tools_table).where(tools_table.c.name == name))
     get_db().commit()
     return jsonify({'ok': True})
 
@@ -167,21 +207,16 @@ def set_attributes(name):
     if not data:
         return jsonify({'error': 'No data'}), 400
 
-    sets = []
-    params = []
+    values = {}
     if 'owner' in data:
-        sets.append('owner = ?')
-        params.append(data['owner'])
+        values['owner'] = data['owner']
     if 'read_only' in data:
-        sets.append('read_only = ?')
-        params.append(int(data['read_only']))
+        values['read_only'] = int(data['read_only'])
     if 'permissions' in data:
-        sets.append('permissions = ?')
-        params.append(json.dumps(data['permissions']))
-    if sets:
-        sets.append("updated_at = datetime('now')")
-        params.append(name)
-        get_db().execute(f"UPDATE tools SET {', '.join(sets)} WHERE name = ?", params)
+        values['permissions'] = json.dumps(data['permissions'])
+    if values:
+        values['updated_at'] = func.now()
+        get_db().execute(update(tools_table).where(tools_table.c.name == name).values(**values))
         get_db().commit()
     return jsonify({'ok': True})
 
@@ -228,13 +263,18 @@ def execute_tool(name):
 
 @app.route('/health', methods=['GET'])
 def health():
-    return jsonify({'status': 'ok', 'tools': get_db().execute('SELECT count(*) FROM tools').fetchone()[0]})
+    count = get_db().execute(select(func.count()).select_from(tools_table)).scalar_one()
+    return jsonify({'status': 'ok', 'tools': count})
 
 # ---- DB export/import (SQL text dump) ----
 
 @app.route('/db/export', methods=['GET'])
 def db_export():
-    db = get_db()
+    if DB_DRIVER != 'sqlite':
+        return '', 501
+
+    db = sqlite3.connect(DB_PATH)
+    db.row_factory = sqlite3.Row
     lines = []
     tables = db.execute("SELECT name, sql FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'").fetchall()
     for t in tables:
@@ -255,11 +295,15 @@ def db_export():
             val_str = ','.join(vals)
             lines.append(f'INSERT INTO "{t["name"]}" ({col_str}) VALUES ({val_str});')
     dump = '\n'.join(lines) + '\n'
+    db.close()
     return app.response_class(dump, mimetype='text/plain',
                               headers={'Content-Disposition': 'attachment; filename=tools.sql'})
 
 @app.route('/db/import', methods=['POST'])
 def db_import():
+    if DB_DRIVER != 'sqlite':
+        return '', 501
+
     sql = request.get_data(as_text=True)
     if not sql or len(sql) < 10:
         return jsonify({'error': 'Empty SQL dump'}), 400
@@ -267,6 +311,7 @@ def db_import():
     db = g.pop('db', None)
     if db:
         db.close()
+    engine.dispose()
     if os.path.exists(DB_PATH):
         os.unlink(DB_PATH)
     new_db = sqlite3.connect(DB_PATH)
@@ -457,17 +502,6 @@ TOOL_FILE_ANALYSIS_SCHEMA = json.dumps({
 })
 
 def seed_builtin_tools():
-    db = sqlite3.connect(DB_PATH)
-    existing = db.execute("SELECT name FROM tools WHERE name = 'file_analysis'").fetchone()
-    if not existing:
-        db.execute(
-            'INSERT INTO tools (name, description, code, params_schema, owner, read_only, permissions) VALUES (?, ?, ?, ?, ?, ?, ?)',
-            ('file_analysis', 'Analyze PDF, PPTX, DOCX files. Input: {file: base64, filename: str}', TOOL_FILE_ANALYSIS, TOOL_FILE_ANALYSIS_SCHEMA, 'system', 1, json.dumps({'*': ['read', 'execute']}))
-        )
-    else:
-        # Update schema on existing tool
-        db.execute('UPDATE tools SET params_schema = ? WHERE name = ?', (TOOL_FILE_ANALYSIS_SCHEMA, 'file_analysis'))
-
     # Seed: lowercase tool
     TOOL_LOWERCASE_CODE = '''def run(params):
     text = params.get('text', '')
@@ -482,15 +516,41 @@ def seed_builtin_tools():
         },
         "required": ["text"]
     })
-    existing_lc = db.execute("SELECT name FROM tools WHERE name = 'lowercase'").fetchone()
-    if not existing_lc:
-        db.execute(
-            'INSERT INTO tools (name, description, code, params_schema, owner, read_only, permissions) VALUES (?, ?, ?, ?, ?, ?, ?)',
-            ('lowercase', 'Convert all text to lowercase', TOOL_LOWERCASE_CODE, TOOL_LOWERCASE_SCHEMA, 'system', 0, json.dumps({'*': ['read', 'execute']}))
-        )
 
-    db.commit()
-    db.close()
+    with engine.begin() as db:
+        existing = db.execute(select(tools_table.c.name).where(tools_table.c.name == 'file_analysis')).fetchone()
+        if not existing:
+            db.execute(
+                insert(tools_table).values(
+                    name='file_analysis',
+                    description='Analyze PDF, PPTX, DOCX files. Input: {file: base64, filename: str}',
+                    code=TOOL_FILE_ANALYSIS,
+                    params_schema=TOOL_FILE_ANALYSIS_SCHEMA,
+                    owner='system',
+                    read_only=1,
+                    permissions=json.dumps({'*': ['read', 'execute']}),
+                )
+            )
+        else:
+            db.execute(
+                update(tools_table)
+                .where(tools_table.c.name == 'file_analysis')
+                .values(params_schema=TOOL_FILE_ANALYSIS_SCHEMA, updated_at=func.now())
+            )
+
+        existing_lc = db.execute(select(tools_table.c.name).where(tools_table.c.name == 'lowercase')).fetchone()
+        if not existing_lc:
+            db.execute(
+                insert(tools_table).values(
+                    name='lowercase',
+                    description='Convert all text to lowercase',
+                    code=TOOL_LOWERCASE_CODE,
+                    params_schema=TOOL_LOWERCASE_SCHEMA,
+                    owner='system',
+                    read_only=0,
+                    permissions=json.dumps({'*': ['read', 'execute']}),
+                )
+            )
 
 # ---- Main ----
 
@@ -499,5 +559,5 @@ if __name__ == '__main__':
     seed_builtin_tools()
     port = int(os.environ.get('PYWORKER_PORT', '3002'))
     print(f'[pyworker] Tool engine on http://localhost:{port}')
-    print(f'[pyworker] DB: {DB_PATH}')
+    print(f'[pyworker] DB: {DB_DRIVER} ({DB_PATH if DB_DRIVER == "sqlite" else "DATABASE_URL"})')
     app.run(host='0.0.0.0', port=port, debug=False)

@@ -1,13 +1,13 @@
 import 'dotenv/config';
 import { initDb } from './db';
 import { setBroadcast, setDataDir, processPrompt, cancelPrompt } from './services/processor';
+import type { Knex } from 'knex';
 
 const DATA_DIR = process.env.DATA_DIR || './data';
 const WEB_PORT = process.env.PORT || '3001';
 const WEB_BASE = `http://localhost:${WEB_PORT}`;
 const POLL_INTERVAL_MS = 2000;
 
-const db = initDb(DATA_DIR);
 setDataDir(DATA_DIR);
 
 function broadcastToWeb(projectId: string, event: object) {
@@ -22,10 +22,13 @@ function broadcastToWeb(projectId: string, event: object) {
 
 setBroadcast(broadcastToWeb);
 
-async function poll() {
-  const pending = db.prepare(
-    "SELECT id, project_id FROM prompts WHERE status = 'pending' AND pipeline_id IS NULL ORDER BY created_at ASC LIMIT 1"
-  ).get() as { id: string; project_id: string } | undefined;
+async function poll(db: Knex) {
+  const pending = await db('prompts')
+    .select('id', 'project_id')
+    .where('status', 'pending')
+    .whereNull('pipeline_id')
+    .orderBy('created_at', 'asc')
+    .first();
 
   if (pending) {
     console.log(`[worker] Processing prompt ${pending.id}`);
@@ -33,23 +36,27 @@ async function poll() {
   }
 
   // Handle cancel requests
-  const cancelRequests = db.prepare(
-    "SELECT id, project_id FROM prompts WHERE status = 'cancel_requested' AND pipeline_id IS NULL"
-  ).all() as { id: string; project_id: string }[];
+  const cancelRequests = await db('prompts')
+    .select('id', 'project_id')
+    .where('status', 'cancel_requested')
+    .whereNull('pipeline_id');
 
   for (const req of cancelRequests) {
     const cancelled = cancelPrompt(req.id);
     if (!cancelled) {
-      db.prepare("UPDATE prompts SET status = 'stopped', updated_at = datetime('now') WHERE id = ?").run(req.id);
+      await db('prompts').where('id', req.id).update({ status: 'stopped', updated_at: db.fn.now() });
       broadcastToWeb(req.project_id, { type: 'prompt-status', promptId: req.id, status: 'stopped' });
     }
   }
 }
 
-async function loop() {
+async function main() {
+  const db = await initDb();
+
+  console.log('[worker] Started, polling every', POLL_INTERVAL_MS, 'ms');
   while (true) {
     try {
-      await poll();
+      await poll(db);
     } catch (err: any) {
       console.error('[worker] Poll error:', err.message);
     }
@@ -57,5 +64,4 @@ async function loop() {
   }
 }
 
-console.log('[worker] Started, polling every', POLL_INTERVAL_MS, 'ms');
-loop();
+main();
