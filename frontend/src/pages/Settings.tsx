@@ -204,7 +204,7 @@ export default function Settings() {
       {/* ===== SKILLS TAB ===== */}
       {tab === 'skills' && (
         <div className="card">
-          <p className="hint">Skills are system prompts invoked via /skillname in the chat. Optionally bind a tool for pre-processing.</p>
+          <p className="hint">Skills are system prompts invoked via /skillname in the prompt. Optionally bind a tool for pre-processing.</p>
 
           {skills.map(skill => (
             <div key={skill.id} className="skill-item">

@@ -36,6 +36,17 @@ router.get('/:id', async (req: Request, res: Response) => {
   res.json({ ...project, files });
 });
 
+// RENAME project
+router.patch('/:id', async (req: Request, res: Response) => {
+  const db = req.app.locals.db as Knex;
+  const { name } = req.body;
+  if (!name || typeof name !== 'string') { res.status(400).json({ error: 'name is required' }); return; }
+  await db('projects').where('id', req.params.id).update({ name: name.trim() });
+  const project = await db('projects').where('id', req.params.id).first();
+  if (!project) { res.status(404).json({ error: 'Project not found' }); return; }
+  res.json(project);
+});
+
 // DELETE project
 router.delete('/:id', async (req: Request, res: Response) => {
   const db = req.app.locals.db as Knex;
