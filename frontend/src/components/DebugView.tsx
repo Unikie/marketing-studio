@@ -6,8 +6,6 @@ interface DebugViewProps {
 }
 
 function cleanForDebug(prompts: Prompt[]): unknown[] {
-  const byId = new Map(prompts.map(p => [p.id, p]));
-
   // Build tree: nest pipeline children under parents
   const topLevel = prompts.filter(p => !p.pipeline_id);
 

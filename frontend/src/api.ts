@@ -85,6 +85,13 @@ export const api = {
 
   getProject: (id: string): Promise<Project> => request(`/api/projects/${id}`),
 
+  renameProject: (id: string, name: string): Promise<Project> =>
+    request(`/api/projects/${id}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name }),
+    }),
+
   deleteProject: (id: string): Promise<void> =>
     request(`/api/projects/${id}`, { method: 'DELETE' }),
 
