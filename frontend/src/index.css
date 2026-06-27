@@ -16,12 +16,62 @@
 body {
   margin: 0;
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-  background: #f5f5f5;
-  color: #333;
+  background: var(--bg);
+  color: var(--text);
+}
+
+:root {
+  --bg: #f5f5f5;
+  --text: #333;
+  --card-bg: white;
+  --card-border: #e9ecef;
+  --input-bg: white;
+  --input-border: #ddd;
+  --accent: #4361ee;
+  --accent-hover: #3a56d4;
+  --muted: #888;
+  --user-msg-bg: #e8edfb;
+  --header-bg: #1a1a2e;
+  --border: #ddd;
+  --hover-bg: #f0f4ff;
+  --badge-bg: #e9ecef;
+  --code-bg: #fafafa;
+  --slash-bg: white;
+  --editing-bg: #fff3cd;
+  --editing-border: #ffc107;
+  --editing-text: #664d03;
+  --file-chip-bg: #f0f0f0;
+  --file-chip-text: #555;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #1a1a1a;
+    --text: #e0e0e0;
+    --card-bg: #2a2a2a;
+    --card-border: #3a3a3a;
+    --input-bg: #2a2a2a;
+    --input-border: #444;
+    --accent: #5b7bff;
+    --accent-hover: #4a6ae8;
+    --muted: #999;
+    --user-msg-bg: #2a3050;
+    --header-bg: #111122;
+    --border: #3a3a3a;
+    --hover-bg: #2a3050;
+    --badge-bg: #333;
+    --code-bg: #1e1e1e;
+    --slash-bg: #2a2a2a;
+    --editing-bg: #3d3520;
+    --editing-border: #8a7020;
+    --editing-text: #e0d080;
+    --file-chip-bg: #333;
+    --file-chip-text: #ccc;
+  }
 }
 
 .app-header {
-  background: #1a1a2e;
+  background: var(--header-bg);
   color: white;
   padding: 1rem 2rem;
   display: flex;
@@ -72,12 +122,12 @@ button {
 }
 
 button.primary {
-  background: #4361ee;
+  background: var(--accent);
   color: white;
 }
 
 button.primary:hover {
-  background: #3a56d4;
+  background: var(--accent-hover);
 }
 
 button.danger {
@@ -91,14 +141,16 @@ button.danger:hover {
 
 input, textarea {
   padding: 0.4rem 0.5rem;
-  border: 1px solid #ddd;
+  border: 1px solid var(--input-border);
   border-radius: 4px;
   font-size: 0.8rem;
   width: 100%;
+  background: var(--input-bg);
+  color: var(--text);
 }
 
 .card {
-  background: white;
+  background: var(--card-bg);
   border-radius: 8px;
   padding: 1.5rem;
   margin-bottom: 1rem;
@@ -134,7 +186,7 @@ input, textarea {
   justify-content: space-between;
   align-items: center;
   padding: 1rem 0;
-  border-bottom: 1px solid #eee;
+  border-bottom: 1px solid var(--border);
 }
 
 .project-list-item:last-child {
@@ -156,12 +208,12 @@ input, textarea {
   align-items: center;
   gap: 1rem;
   padding: 0.75rem 0;
-  border-bottom: 1px solid #ddd;
+  border-bottom: 1px solid var(--border);
   flex-shrink: 0;
 }
 
 .chat-header a {
-  color: #4361ee;
+  color: var(--accent);
   text-decoration: none;
   font-size: 0.9rem;
 }
@@ -180,7 +232,7 @@ input, textarea {
 
 .chat-empty {
   text-align: center;
-  color: #888;
+  color: var(--muted);
   padding: 4rem 1rem;
 }
 
@@ -200,7 +252,7 @@ input, textarea {
 }
 
 .branch-btn {
-  background: #e9ecef;
+  background: var(--badge-bg);
   border: none;
   border-radius: 3px;
   width: 22px;
@@ -211,7 +263,7 @@ input, textarea {
   cursor: pointer;
   font-size: 0.85rem;
   padding: 0;
-  color: #555;
+  color: var(--file-chip-text);
 }
 
 .branch-btn:disabled {
@@ -235,12 +287,12 @@ input, textarea {
 }
 
 .user-msg {
-  background: #e8edfb;
+  background: var(--user-msg-bg);
 }
 
 .assistant-msg {
-  background: white;
-  border: 1px solid #e9ecef;
+  background: var(--card-bg);
+  border: 1px solid var(--card-border);
 }
 
 .msg-footer {
@@ -335,11 +387,11 @@ input, textarea {
   display: inline-flex;
   align-items: center;
   gap: 0.3rem;
-  background: #f0f0f0;
+  background: var(--file-chip-bg);
   padding: 0.2rem 0.5rem;
   border-radius: 12px;
   font-size: 0.8rem;
-  color: #555;
+  color: var(--file-chip-text);
 }
 
 .typing-indicator {
@@ -362,16 +414,16 @@ input, textarea {
 
 .chat-input-container {
   flex-shrink: 0;
-  border-top: 1px solid #ddd;
-  background: white;
+  border-top: 1px solid var(--border);
+  background: var(--card-bg);
   padding: 0.75rem;
   border-radius: 0 0 8px 8px;
   transition: border-color 0.2s;
 }
 
 .chat-input-container.dragover {
-  border-color: #4361ee;
-  background: #f0f4ff;
+  border-color: var(--accent);
+  background: var(--hover-bg);
 }
 
 .editing-banner {
@@ -380,17 +432,17 @@ input, textarea {
   justify-content: space-between;
   padding: 0.3rem 0.5rem;
   margin-bottom: 0.5rem;
-  background: #fff3cd;
-  border: 1px solid #ffc107;
+  background: var(--editing-bg);
+  border: 1px solid var(--editing-border);
   border-radius: 4px;
   font-size: 0.8rem;
-  color: #664d03;
+  color: var(--editing-text);
 }
 
 .editing-banner button {
   background: none;
   border: none;
-  color: #664d03;
+  color: var(--editing-text);
   cursor: pointer;
   font-size: 0.8rem;
   text-decoration: underline;
@@ -442,10 +494,11 @@ input, textarea {
 
 .mode-select {
   padding: 0.4rem;
-  border: 1px solid #ddd;
+  border: 1px solid var(--input-border);
   border-radius: 4px;
   font-size: 0.8rem;
-  background: white;
+  background: var(--input-bg);
+  color: var(--text);
   flex-shrink: 0;
   width: auto;
 }
@@ -456,21 +509,23 @@ input, textarea {
   min-height: 38px;
   max-height: 200px;
   padding: 0.5rem;
-  border: 1px solid #ddd;
+  border: 1px solid var(--input-border);
   border-radius: 4px;
   font-size: 0.9rem;
   font-family: inherit;
   line-height: 1.4;
   overflow-y: auto;
+  background: var(--input-bg);
+  color: var(--text);
 }
 
 .chat-textarea:focus {
   outline: none;
-  border-color: #4361ee;
+  border-color: var(--accent);
 }
 
 .send-btn {
-  background: #4361ee;
+  background: var(--accent);
   color: white;
   border: none;
   border-radius: 50%;
@@ -485,7 +540,7 @@ input, textarea {
 }
 
 .send-btn:hover:not(:disabled) {
-  background: #3a56d4;
+  background: var(--accent-hover);
 }
 
 .send-btn:disabled {
@@ -499,7 +554,7 @@ input, textarea {
   display: flex;
   gap: 2px;
   margin-left: auto;
-  background: #e9ecef;
+  background: var(--badge-bg);
   border-radius: 6px;
   padding: 2px;
 }
@@ -516,13 +571,13 @@ input, textarea {
 }
 
 .view-tab.active {
-  background: white;
-  color: #333;
+  background: var(--card-bg);
+  color: var(--text);
   box-shadow: 0 1px 2px rgba(0,0,0,0.1);
 }
 
 .view-tab:hover:not(.active) {
-  color: #333;
+  color: var(--text);
 }
 
 /* ---- Debug view ---- */
@@ -651,8 +706,8 @@ input, textarea {
   bottom: 100%;
   left: 0;
   right: 0;
-  background: white;
-  border: 1px solid #ddd;
+  background: var(--slash-bg);
+  border: 1px solid var(--input-border);
   border-radius: 8px;
   box-shadow: 0 4px 12px rgba(0,0,0,0.15);
   margin-bottom: 4px;
@@ -671,13 +726,13 @@ input, textarea {
 
 .slash-item:hover,
 .slash-item.active {
-  background: #f0f4ff;
+  background: var(--hover-bg);
 }
 
 .slash-name {
   font-weight: 600;
   font-size: 0.85rem;
-  color: #4361ee;
+  color: var(--accent);
 }
 
 .slash-desc {
@@ -701,7 +756,7 @@ input, textarea {
 }
 
 .settings-header a {
-  color: #4361ee;
+  color: var(--accent);
   text-decoration: none;
 }
 
@@ -713,7 +768,7 @@ input, textarea {
   display: flex;
   gap: 0;
   margin-bottom: 1rem;
-  border-bottom: 2px solid #ddd;
+  border-bottom: 2px solid var(--border);
 }
 
 .settings-tabs .tab {
@@ -733,8 +788,8 @@ input, textarea {
 }
 
 .settings-tabs .tab.active {
-  color: #4361ee;
-  border-bottom-color: #4361ee;
+  color: var(--accent);
+  border-bottom-color: var(--accent);
   font-weight: 600;
 }
 
@@ -746,10 +801,10 @@ input, textarea {
 }
 
 .code-editor-wrapper {
-  border: 1px solid #ddd;
+  border: 1px solid var(--input-border);
   border-radius: 4px;
   overflow: auto;
-  background: #fafafa;
+  background: var(--code-bg);
 }
 
 .code-editor-wrapper textarea {
@@ -763,7 +818,7 @@ input, textarea {
 }
 
 .skill-item {
-  border-bottom: 1px solid #eee;
+  border-bottom: 1px solid var(--border);
   padding: 0.75rem 0;
 }
 
@@ -858,17 +913,17 @@ input, textarea {
   margin-top: 1rem;
   padding: 0.5rem 1rem;
   background: none;
-  border: 1px dashed #aaa;
+  border: 1px dashed var(--muted);
   border-radius: 6px;
-  color: #4361ee;
+  color: var(--accent);
   cursor: pointer;
   font-size: 0.9rem;
   transition: border-color 0.15s, background 0.15s;
 }
 
 .add-new-btn:hover {
-  border-color: #4361ee;
-  background: #f0f4ff;
+  border-color: var(--accent);
+  background: var(--hover-bg);
 }
 
 .skill-add textarea {
@@ -907,6 +962,6 @@ input, textarea {
   border-radius: 4px;
   text-decoration: none;
   font-size: 0.85rem;
-  background: #4361ee;
+  background: var(--accent);
   color: white;
 }
