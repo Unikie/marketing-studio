@@ -22,7 +22,7 @@ interface FileRow { id: string; filename: string; name: string; analysis: string
 interface PromptRow {
   id: string; project_id: string; pipeline_id: string | null;
   type: string; prompt: string; response: string;
-  skill_id: string | null; system_instruction_id: string | null;
+  skill_id: string | null; personality_id: string | null;
   status: string; created_at: string;
 }
 
@@ -181,8 +181,8 @@ async function isCancelled(db: Knex, promptId: string): Promise<boolean> {
   return row?.status === 'cancel_requested';
 }
 
-async function getSystemInstruction(db: Knex): Promise<{ id: string; text: string }> {
-  const row = await db('system_instructions').select('id', 'text').orderBy('created_at', 'desc').first();
+async function getPersonality(db: Knex): Promise<{ id: string; text: string }> {
+  const row = await db('personality').select('id', 'text').orderBy('created_at', 'desc').first();
   return row || { id: 'default', text: '' };
 }
 
@@ -293,10 +293,10 @@ export async function processPrompt(db: Knex, projectId: string, promptId: strin
     const parsed = parsePrompt(currentPrompt.prompt, db);
     const { skills } = await parsed.getSkills();
     const userText = parsed.userText;
-    const sysInstruction = await getSystemInstruction(db);
+    const personality = await getPersonality(db);
 
-    // Store system_instruction_id reference
-    await db('prompts').where('id', promptId).update({ system_instruction_id: sysInstruction.id });
+    // Store personality_id reference
+    await db('prompts').where('id', promptId).update({ personality_id: personality.id });
 
     // Get files attached to this prompt (via prompt_context file refs)
     const fileRefs = await db('prompt_context').select('ref_id').where('prompt_id', promptId).where('ref_type', 'file');
@@ -324,7 +324,7 @@ export async function processPrompt(db: Knex, projectId: string, promptId: strin
     // ===== SIMPLE LLM (no files, no skills) =====
     if (!needsPipeline) {
       const context = projectContext;
-      const msgs = buildMessages({ systemPrompt: sysInstruction.text, context, userContent: userText });
+      const msgs = buildMessages({ systemPrompt: personality.text, context, userContent: userText });
 
       await db('prompts').where('id', promptId).update({ messages: JSON.stringify(msgs), updated_at: db.fn.now() });
 
@@ -360,7 +360,7 @@ export async function processPrompt(db: Knex, projectId: string, promptId: strin
 
         await db('prompts').insert({
           id: toolId, project_id: projectId, pipeline_id: promptId, type: 'tool',
-          prompt: file.name, response: analysisJson, system_instruction_id: sysInstruction.id, status: 'completed',
+          prompt: file.name, response: analysisJson, personality_id: personality.id, status: 'completed',
         });
 
         await db('prompt_context').insert({ prompt_id: toolId, ref_type: 'file', ref_id: file.id });
@@ -387,7 +387,7 @@ export async function processPrompt(db: Knex, projectId: string, promptId: strin
             await db('prompts').insert({
               id: toolCallId, project_id: projectId, pipeline_id: promptId, type: 'tool',
               prompt: `${skill.tool_name} (arg-gen)`, response: '', skill_id: skill.id,
-              system_instruction_id: sysInstruction.id, status: 'error', error: schemaError,
+              personality_id: personality.id, status: 'error', error: schemaError,
             });
             if (lastChildId) {
               await db('prompt_context').insert({ prompt_id: toolCallId, ref_type: 'prompt', ref_id: lastChildId });
@@ -419,7 +419,7 @@ export async function processPrompt(db: Knex, projectId: string, promptId: strin
             id: argGenId, project_id: projectId, pipeline_id: promptId, type: 'llm',
             prompt: argGenPrompt, response: JSON.stringify(args || argError),
             messages: JSON.stringify(argGenMsgs), skill_id: skill.id,
-            system_instruction_id: sysInstruction.id, status: argError ? 'error' : 'completed',
+            personality_id: personality.id, status: argError ? 'error' : 'completed',
           });
           if (lastChildId) {
             await db('prompt_context').insert({ prompt_id: argGenId, ref_type: 'prompt', ref_id: lastChildId });
@@ -431,7 +431,7 @@ export async function processPrompt(db: Knex, projectId: string, promptId: strin
             await db('prompts').insert({
               id: toolCallId, project_id: projectId, pipeline_id: promptId, type: 'tool',
               prompt: `${skill.tool_name}`, response: JSON.stringify({ attempted_args: args }),
-              skill_id: skill.id, system_instruction_id: sysInstruction.id,
+              skill_id: skill.id, personality_id: personality.id,
               status: 'error', error: argError || 'Failed to generate tool arguments',
             });
             await db('prompt_context').insert({ prompt_id: toolCallId, ref_type: 'prompt', ref_id: lastChildId });
@@ -459,7 +459,7 @@ export async function processPrompt(db: Knex, projectId: string, promptId: strin
           await db('prompts').insert({
             id: toolCallId, project_id: projectId, pipeline_id: promptId, type: 'tool',
             prompt: `${skill.tool_name} ${JSON.stringify(resolvedInfo)}`, response: toolResultJson,
-            skill_id: skill.id, system_instruction_id: sysInstruction.id, status: 'completed',
+            skill_id: skill.id, personality_id: personality.id, status: 'completed',
           });
           await db('prompt_context').insert({ prompt_id: toolCallId, ref_type: 'prompt', ref_id: lastChildId });
           broadcast(projectId, { type: 'prompt-status', promptId: toolCallId, status: 'completed' });
@@ -473,7 +473,7 @@ export async function processPrompt(db: Knex, projectId: string, promptId: strin
         await db('prompts').insert({
           id: skillPromptId, project_id: projectId, pipeline_id: promptId, type: 'llm',
           prompt: skill.system_prompt, skill_id: skill.id,
-          system_instruction_id: sysInstruction.id, status: 'processing',
+          personality_id: personality.id, status: 'processing',
         });
 
         if (lastChildId) {
@@ -484,7 +484,7 @@ export async function processPrompt(db: Knex, projectId: string, promptId: strin
 
         const chainContext = (await unwindContext(db, skillPromptId)).map((c: any) => ({ ...c, _current: true }));
         const fullContext = [...projectContext, ...chainContext];
-        const systemPrompt = sysInstruction.text;
+        const systemPrompt = personality.text;
         const msgs = buildMessages({ systemPrompt, context: fullContext, userContent: skill.system_prompt });
 
         await db('prompts').where('id', skillPromptId).update({ messages: JSON.stringify(msgs), updated_at: db.fn.now() });
@@ -508,7 +508,7 @@ export async function processPrompt(db: Knex, projectId: string, promptId: strin
     const finalId = uuidv4();
     await db('prompts').insert({
       id: finalId, project_id: projectId, pipeline_id: promptId, type: 'llm',
-      prompt: currentPrompt.prompt, system_instruction_id: sysInstruction.id, status: 'processing',
+      prompt: currentPrompt.prompt, personality_id: personality.id, status: 'processing',
     });
 
     if (lastChildId) {
@@ -519,7 +519,7 @@ export async function processPrompt(db: Knex, projectId: string, promptId: strin
 
     const chainContext = (await unwindContext(db, finalId)).map((c: any) => ({ ...c, _current: true }));
     const fullContext = [...projectContext, ...chainContext];
-    const msgs = buildMessages({ systemPrompt: sysInstruction.text, context: fullContext, userContent: currentPrompt.prompt });
+    const msgs = buildMessages({ systemPrompt: personality.text, context: fullContext, userContent: currentPrompt.prompt });
 
     await db('prompts').where('id', finalId).update({ messages: JSON.stringify(msgs), updated_at: db.fn.now() });
 

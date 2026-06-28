@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import { Link } from 'react-router-dom';
-import { api, Skill, Tool, SystemInstruction } from '../api';
+import { api, Skill, Tool, Personality } from '../api';
 import CodeEditor from '../components/CodeEditor';
 
 function formatDate(iso: string): { short: string; full: string } {
@@ -14,7 +14,7 @@ function formatDate(iso: string): { short: string; full: string } {
   return { short, full };
 }
 
-type Tab = 'instructions' | 'tools' | 'skills';
+type Tab = 'personality' | 'tools' | 'skills';
 
 export default function Settings() {
   const [tab, setTab] = useState<Tab>('skills');
@@ -22,8 +22,8 @@ export default function Settings() {
   const [tools, setTools] = useState<Tool[]>([]);
   const [loading, setLoading] = useState(true);
 
-  // Instructions state
-  const [instrVersions, setInstrVersions] = useState<SystemInstruction[]>([]);
+  // Personality state
+  const [instrVersions, setInstrVersions] = useState<Personality[]>([]);
   const [instrIndex, setInstrIndex] = useState(0);
   const [instrText, setInstrText] = useState('');
   const [instrEditing, setInstrEditing] = useState(false);
@@ -70,10 +70,10 @@ export default function Settings() {
     } finally { setLoading(false); }
   }
 
-  // ---- Instructions ----
+  // ---- Personality ----
   async function loadInstrVersions() {
     try {
-      const v = await api.getInstructionVersions();
+      const v = await api.getPersonalityVersions();
       setInstrVersions(v);
       if (v.length > 0) {
         const lastIdx = v.length - 1;
@@ -81,12 +81,12 @@ export default function Settings() {
         setInstrText(v[lastIdx].text);
         loadInstrProjects(v[lastIdx].id);
       }
-    } catch (err) { console.error('Failed to load instructions:', err); }
+    } catch (err) { console.error('Failed to load personality:', err); }
   }
 
   async function loadInstrProjects(versionId: string) {
     try {
-      const p = await api.getInstructionProjects(versionId);
+      const p = await api.getPersonalityProjects(versionId);
       setInstrProjects(p);
     } catch { setInstrProjects([]); }
   }
@@ -104,7 +104,7 @@ export default function Settings() {
     if (!instrText.trim() || instrSaving) return;
     setInstrSaving(true);
     try {
-      const created = await api.updateInstruction(instrText.trim());
+      const created = await api.updatePersonality(instrText.trim());
       const updated = [...instrVersions, created];
       setInstrVersions(updated);
       setInstrIndex(updated.length - 1);
@@ -113,7 +113,7 @@ export default function Settings() {
       loadInstrProjects(created.id);
     } catch (err) {
       console.error('Failed to save:', err);
-      alert('Failed to save system instruction');
+      alert('Failed to save personality');
     } finally { setInstrSaving(false); }
   }
 
@@ -229,11 +229,11 @@ export default function Settings() {
       <div className="settings-tabs">
         <button className={tab === 'skills' ? 'tab active' : 'tab'} onClick={() => setTab('skills')}>Skills</button>
         <button className={tab === 'tools' ? 'tab active' : 'tab'} onClick={() => setTab('tools')}>Tools</button>
-        <button className={tab === 'instructions' ? 'tab active' : 'tab'} onClick={() => setTab('instructions')}>Instructions</button>
+        <button className={tab === 'personality' ? 'tab active' : 'tab'} onClick={() => setTab('personality')}>Personality</button>
       </div>
 
-      {/* ===== INSTRUCTIONS TAB ===== */}
-      {tab === 'instructions' && (
+      {/* ===== PERSONALITY TAB ===== */}
+      {tab === 'personality' && (
         <div className="instr-tab">
           <div className="instr-version-bar">
             <div className="instr-nav">
@@ -267,7 +267,7 @@ export default function Settings() {
                   autoFocus
                 />
               ) : (
-                <div className="msg-body instr-body">{instrText || <span className="hint">No instructions yet.</span>}</div>
+                <div className="msg-body instr-body">{instrText || <span className="hint">No personality yet.</span>}</div>
               )}
             </div>
             <div className="msg-meta">
@@ -281,7 +281,7 @@ export default function Settings() {
 
           {instrProjects.length > 0 && (
             <div className="instr-projects">
-              <span className="instr-projects-label">Used by:</span>
+              <span className="instr-projects-label">used in:</span>
               {instrProjects.map(p => (
                 <Link key={p.id} to={`/projects/${p.id}`} className="instr-project-link">{p.name}</Link>
               ))}

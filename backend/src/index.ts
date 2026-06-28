@@ -9,7 +9,7 @@ import { filesRouter } from './routes/files';
 import { promptsRouter } from './routes/prompts';
 import { eventsRouter } from './routes/events';
 import { skillsRouter } from './routes/skills';
-import { instructionsRouter } from './routes/instructions';
+import { personalityRouter } from './routes/personality';
 import { toolsRouter } from './routes/tools';
 import { draftsRouter } from './routes/drafts';
 
@@ -31,7 +31,7 @@ app.use('/api/projects/:projectId/files', filesRouter);
 app.use('/api/projects/:projectId/prompts', promptsRouter);
 app.use('/api/events', eventsRouter);
 app.use('/api/skills', skillsRouter);
-app.use('/api/instructions', instructionsRouter);
+app.use('/api/personality', personalityRouter);
 app.use('/api/tools', toolsRouter);
 app.use('/api/drafts', draftsRouter);
 

@@ -1,6 +1,6 @@
 import type { Knex } from 'knex';
 
-const DEFAULT_INSTRUCTION = `You are a deterministic processing tool. You are NOT a conversational assistant or chatbot.
+const DEFAULT_PERSONALITY = `You are a deterministic processing tool. You are NOT a conversational assistant or chatbot.
 
 BEHAVIOR RULES:
 - Execute instructions precisely. Do not add pleasantries, greetings, or filler.
@@ -38,7 +38,7 @@ export async function up(knex: Knex): Promise<void> {
     t.timestamp('created_at').notNullable().defaultTo(knex.fn.now());
   });
 
-  await knex.schema.createTable('system_instructions', (t) => {
+  await knex.schema.createTable('personality', (t) => {
     t.text('id').primary();
     t.text('text').notNullable();
     t.timestamp('created_at').notNullable().defaultTo(knex.fn.now());
@@ -62,7 +62,7 @@ export async function up(knex: Knex): Promise<void> {
     t.text('response').notNullable().defaultTo('');
     t.text('messages');
     t.text('skill_id').references('id').inTable('skills');
-    t.text('system_instruction_id').references('id').inTable('system_instructions');
+    t.text('personality_id').references('id').inTable('personality');
     t.text('status').notNullable().defaultTo('pending');
     t.text('error');
     t.timestamp('created_at').notNullable().defaultTo(knex.fn.now());
@@ -75,12 +75,12 @@ export async function up(knex: Knex): Promise<void> {
     t.text('ref_id').notNullable();
   });
 
-  // Seed default instruction
-  const existing = await knex('system_instructions').where('id', 'default').first();
+  // Seed default personality
+  const existing = await knex('personality').where('id', 'default').first();
   if (!existing) {
-    await knex('system_instructions').insert({
+    await knex('personality').insert({
       id: 'default',
-      text: DEFAULT_INSTRUCTION,
+      text: DEFAULT_PERSONALITY,
     });
   }
 }
@@ -89,7 +89,7 @@ export async function down(knex: Knex): Promise<void> {
   await knex.schema.dropTableIfExists('prompt_context');
   await knex.schema.dropTableIfExists('prompts');
   await knex.schema.dropTableIfExists('skills');
-  await knex.schema.dropTableIfExists('system_instructions');
+  await knex.schema.dropTableIfExists('personality');
   await knex.schema.dropTableIfExists('files');
   await knex.schema.dropTableIfExists('projects');
 }

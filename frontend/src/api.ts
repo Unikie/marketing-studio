@@ -47,7 +47,7 @@ export interface Skill {
   created_at: string;
 }
 
-export interface SystemInstruction {
+export interface Personality {
   id: string;
   text: string;
   created_at: string;
@@ -149,20 +149,20 @@ export const api = {
   deleteSkill: (id: string): Promise<void> =>
     request(`/api/skills/${id}`, { method: 'DELETE' }),
 
-  // System Instructions API
-  getInstruction: (): Promise<SystemInstruction> => request('/api/instructions'),
+  // Personality API
+  getPersonality: (): Promise<Personality> => request('/api/personality'),
 
-  updateInstruction: (text: string): Promise<SystemInstruction> =>
-    request('/api/instructions', {
+  updatePersonality: (text: string): Promise<Personality> =>
+    request('/api/personality', {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ text }),
     }),
 
-  getInstructionVersions: (): Promise<SystemInstruction[]> => request('/api/instructions/versions'),
+  getPersonalityVersions: (): Promise<Personality[]> => request('/api/personality/versions'),
 
-  getInstructionProjects: (id: string): Promise<{ id: string; name: string }[]> =>
-    request(`/api/instructions/versions/${encodeURIComponent(id)}/projects`),
+  getPersonalityProjects: (id: string): Promise<{ id: string; name: string }[]> =>
+    request(`/api/personality/versions/${encodeURIComponent(id)}/projects`),
 
   getSSEUrl: (projectId: string): string => `${BASE_URL}/api/events/${projectId}`,
 
