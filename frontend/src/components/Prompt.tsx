@@ -63,6 +63,24 @@ const Prompt = forwardRef<PromptHandle, PromptProps>(function Prompt(
   }, [inputText]);
 
   useEffect(() => {
+    const el = textareaRef.current;
+    if (!el) return;
+    const container = el.parentElement;
+    if (!container) return;
+    let prevWidth = container.clientWidth;
+    const ro = new ResizeObserver(() => {
+      const newWidth = container.clientWidth;
+      if (newWidth !== prevWidth) {
+        prevWidth = newWidth;
+        el.style.height = 'auto';
+        el.style.height = Math.min(el.scrollHeight, 200) + 'px';
+      }
+    });
+    ro.observe(container);
+    return () => ro.disconnect();
+  }, []);
+
+  useEffect(() => {
     if (!plusMenuOpen) return;
     function handleClickOutside(e: MouseEvent) {
       if (plusMenuRef.current && !plusMenuRef.current.contains(e.target as Node)) setPlusMenuOpen(false);
