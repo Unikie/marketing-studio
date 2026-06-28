@@ -552,6 +552,18 @@ def seed_builtin_tools():
                 )
             )
 
+@app.route('/admin/reseed', methods=['POST'])
+def reseed_database():
+    data = request.get_json(silent=True) or {}
+    if data.get('confirmation') != 'NUKE DATABASE':
+        return jsonify({'error': 'confirmation must be "NUKE DATABASE"'}), 400
+    try:
+        init_db()
+        seed_builtin_tools()
+        return jsonify({'ok': True})
+    except Exception as exc:
+        return jsonify({'error': str(exc)}), 500
+
 # ---- Main ----
 
 if __name__ == '__main__':

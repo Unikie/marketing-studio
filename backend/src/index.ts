@@ -12,6 +12,7 @@ import { skillsRouter } from './routes/skills';
 import { personalityRouter } from './routes/personality';
 import { toolsRouter } from './routes/tools';
 import { draftsRouter } from './routes/drafts';
+import { adminRouter } from './routes/admin';
 
 const PORT = parseInt(process.env.PORT || '3001', 10);
 const DATA_DIR = process.env.DATA_DIR || './data';
@@ -34,6 +35,7 @@ app.use('/api/skills', skillsRouter);
 app.use('/api/personality', personalityRouter);
 app.use('/api/tools', toolsRouter);
 app.use('/api/drafts', draftsRouter);
+app.use('/api/admin', adminRouter);
 
 app.get('/api/health', (_req, res) => {
   res.json({ status: 'ok' });
