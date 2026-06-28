@@ -201,7 +201,6 @@ export default function Settings() {
   return (
     <div className="settings-page">
       <div className="settings-header">
-        <Link to="/">← Back</Link>
         <h2>Settings</h2>
       </div>
 

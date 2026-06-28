@@ -338,6 +338,9 @@ body {
   --file-chip-bg: #f0f0f0;
   --file-chip-text: #555;
   --sidebar-bg: #f8f9fa;
+  --scrollbar-track: var(--bg);
+  --scrollbar-thumb: #c7c7c7;
+  --scrollbar-thumb-hover: #a8a8a8;
 }
 
 @media (prefers-color-scheme: dark) {
@@ -364,7 +367,33 @@ body {
     --file-chip-bg: #333;
     --file-chip-text: #ccc;
     --sidebar-bg: #1e1e1e;
+    --scrollbar-track: var(--bg);
+    --scrollbar-thumb: #4a4a4a;
+    --scrollbar-thumb-hover: #626262;
   }
+}
+
+* {
+  scrollbar-color: var(--scrollbar-thumb) var(--scrollbar-track);
+}
+
+*::-webkit-scrollbar {
+  width: 12px;
+  height: 12px;
+}
+
+*::-webkit-scrollbar-track {
+  background: var(--scrollbar-track);
+}
+
+*::-webkit-scrollbar-thumb {
+  background: var(--scrollbar-thumb);
+  border: 3px solid var(--scrollbar-track);
+  border-radius: 999px;
+}
+
+*::-webkit-scrollbar-thumb:hover {
+  background: var(--scrollbar-thumb-hover);
 }
 
 .app-header {
@@ -389,7 +418,10 @@ body {
 
 main {
   flex: 1;
-  overflow: hidden;
+  min-height: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+  scrollbar-gutter: stable;
   display: flex;
   flex-direction: column;
 }
@@ -1132,11 +1164,9 @@ input, textarea {
 
 .settings-page {
   width: 100%;
-  max-width: 700px;
-  margin: 0 auto;
-  padding: 1rem;
-  overflow-y: auto;
-  flex: 1;
+  max-width: none;
+  margin: 0;
+  padding: 1rem clamp(0.75rem, 3vw, 2rem);
 }
 
 .settings-header {
@@ -1144,11 +1174,6 @@ input, textarea {
   align-items: center;
   gap: 1rem;
   margin-bottom: 1rem;
-}
-
-.settings-header a {
-  color: var(--accent);
-  text-decoration: none;
 }
 
 .settings-header h2 {
