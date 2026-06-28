@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { useParams } from 'react-router-dom';
+import { useParams, useLocation } from 'react-router-dom';
 import { api, type Project as ProjectData, Prompt as PromptData } from '../api';
 import { useSSE } from '../hooks/useSSE';
 import DebugView from '../components/DebugView';
@@ -83,8 +83,21 @@ export default function Project() {
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   const isNearBottomRef = useRef(true);
   const { lastEvent } = useSSE(id);
+  const location = useLocation();
+  const incomingHandled = useRef(false);
 
-  useEffect(() => { if (id) loadData(); }, [id]);
+  useEffect(() => {
+    if (!id) return;
+    const state = location.state as { prompt?: string; files?: File[] } | null;
+    if (state?.prompt && !incomingHandled.current) {
+      // Fresh project — only fetch project metadata, skip history
+      incomingHandled.current = true;
+      api.getProject(id).then(setProject).catch(console.error).finally(() => setLoading(false));
+      handleSend(state.prompt, state.files || []);
+    } else {
+      loadData();
+    }
+  }, [id]);
 
   async function loadData() {
     try {

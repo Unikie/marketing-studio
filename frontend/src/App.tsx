@@ -15,15 +15,7 @@ function NewPrompt() {
     setSending(true);
     try {
       const project = await api.createProject(text.slice(0, 60) || 'Untitled Project');
-      let fileIds: string[] = [];
-      if (files.length > 0) {
-        const uploaded = await api.uploadFiles(project.id, files);
-        fileIds = uploaded.map(f => f.id);
-      }
-      if (text) {
-        await api.createPrompt(project.id, text, fileIds);
-      }
-      navigate(`/projects/${project.id}`);
+      navigate(`/projects/${project.id}`, { replace: true, state: { prompt: text, files } });
     } catch (err) {
       console.error('Failed to create project:', err);
       setSending(false);

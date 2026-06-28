@@ -123,6 +123,14 @@ const Prompt = forwardRef<PromptHandle, PromptProps>(function Prompt(
     textareaRef.current?.focus();
   }
 
+  function handlePaste(e: React.ClipboardEvent) {
+    const files = Array.from(e.clipboardData.files);
+    if (files.length > 0) {
+      e.preventDefault();
+      setInputFiles(prev => [...prev, ...files]);
+    }
+  }
+
   useImperativeHandle(ref, () => ({ setEditText }));
 
   return (
@@ -158,7 +166,7 @@ const Prompt = forwardRef<PromptHandle, PromptProps>(function Prompt(
           onChange={e => { const files = Array.from(e.target.files || []); if (files.length > 0) setInputFiles(prev => [...prev, ...files]); e.target.value = ''; }} />
         <div className="textarea-wrapper">
           <textarea ref={textareaRef} className="prompt-textarea" value={inputText} onChange={handleInputChange}
-            onKeyDown={handleKeyDown} placeholder="Type / for skills, attach files, or type a prompt..." rows={1} disabled={sending} autoFocus={autoFocus} />
+            onKeyDown={handleKeyDown} onPaste={handlePaste} placeholder="Type / for skills, attach files, or type a prompt..." rows={1} disabled={sending} autoFocus={autoFocus} />
           {slashQuery !== null && filteredSkills.length > 0 && (
             <div className="slash-autocomplete">
               {filteredSkills.map((skill, i) => (
