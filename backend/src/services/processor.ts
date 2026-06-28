@@ -9,6 +9,10 @@ let broadcastFn: (projectId: string, event: object) => void = () => {};
 export function setBroadcast(fn: (projectId: string, event: object) => void) { broadcastFn = fn; }
 function broadcast(projectId: string, event: object) { broadcastFn(projectId, event); }
 
+function broadcastStage(projectId: string, pipelineId: string, stageId: string, status: string, label: string, error?: string) {
+  broadcast(projectId, { type: 'pipeline-stage', pipelineId, stageId, status, label, error });
+}
+
 // Data directory — set by the worker
 let dataDir = './data';
 export function setDataDir(dir: string) { dataDir = dir; }
@@ -288,6 +292,8 @@ export async function processPrompt(db: Knex, projectId: string, promptId: strin
 
   const abortController = new AbortController();
   activeAbortControllers.set(promptId, abortController);
+  let activeChildId: string | null = null;
+  let activeStageLabel: string | null = null;
 
   try {
     const parsed = parsePrompt(currentPrompt.prompt, db);
@@ -353,22 +359,29 @@ export async function processPrompt(db: Knex, projectId: string, promptId: strin
 
         const toolId = uuidv4();
         const filePath = path.resolve(dataDir, 'uploads', file.filename);
-        const analysis = await analyzeFileViaWorker(filePath, file.name);
-        const analysisJson = JSON.stringify(analysis);
-
-        await db('files').where('id', file.id).update({ analysis: analysisJson });
-
+        activeChildId = toolId;
+        activeStageLabel = `tool file_analysis: ${file.name}`;
         await db('prompts').insert({
           id: toolId, project_id: projectId, pipeline_id: promptId, type: 'tool',
-          prompt: file.name, response: analysisJson, personality_id: personality.id, status: 'completed',
+          prompt: `file_analysis: ${file.name}`, response: '', personality_id: personality.id, status: 'processing',
         });
-
         await db('prompt_context').insert({ prompt_id: toolId, ref_type: 'file', ref_id: file.id });
         if (lastChildId) {
           await db('prompt_context').insert({ prompt_id: toolId, ref_type: 'prompt', ref_id: lastChildId });
         }
+        broadcast(projectId, { type: 'prompt-status', promptId: toolId, status: 'processing' });
+        broadcastStage(projectId, promptId, toolId, 'processing', activeStageLabel);
+
+        const analysis = await analyzeFileViaWorker(filePath, file.name);
+        const analysisJson = JSON.stringify(analysis);
+
+        await db('files').where('id', file.id).update({ analysis: analysisJson });
+        await db('prompts').where('id', toolId).update({ response: analysisJson, status: 'completed', updated_at: db.fn.now() });
 
         broadcast(projectId, { type: 'prompt-status', promptId: toolId, status: 'completed' });
+          broadcastStage(projectId, promptId, toolId, 'completed', activeStageLabel);
+        activeChildId = null;
+          activeStageLabel = null;
         lastChildId = toolId;
       }
     }
@@ -393,12 +406,27 @@ export async function processPrompt(db: Knex, projectId: string, promptId: strin
               await db('prompt_context').insert({ prompt_id: toolCallId, ref_type: 'prompt', ref_id: lastChildId });
             }
             broadcast(projectId, { type: 'prompt-status', promptId: toolCallId, status: 'error', error: schemaError });
+            broadcastStage(projectId, promptId, toolCallId, 'error', `tool ${skill.tool_name}`, schemaError);
             lastChildId = toolCallId;
             continue;
           }
 
           // Generate args via LLM
           const argGenId = uuidv4();
+          const argGenPrompt = JSON.stringify({ tool: skill.tool_name, description: toolDesc, schema: params_schema });
+          activeChildId = argGenId;
+          activeStageLabel = `llm ${skill.name} args`;
+          await db('prompts').insert({
+            id: argGenId, project_id: projectId, pipeline_id: promptId, type: 'llm',
+            prompt: argGenPrompt, response: '', skill_id: skill.id,
+            personality_id: personality.id, status: 'processing',
+          });
+          if (lastChildId) {
+            await db('prompt_context').insert({ prompt_id: argGenId, ref_type: 'prompt', ref_id: lastChildId });
+          }
+          broadcast(projectId, { type: 'prompt-status', promptId: argGenId, status: 'processing' });
+          broadcastStage(projectId, promptId, argGenId, 'processing', activeStageLabel);
+
           const chainContextForArgs = lastChildId ? await unwindContext(db, lastChildId) : [];
           if (lastChildId) {
             const lastChildRow = await db('prompts').where('id', lastChildId).first() as PromptRow | undefined;
@@ -414,17 +442,14 @@ export async function processPrompt(db: Knex, projectId: string, promptId: strin
             db, skill.tool_name, toolDesc, params_schema, contextForArgs, userText, files
           );
 
-          const argGenPrompt = JSON.stringify({ tool: skill.tool_name, description: toolDesc, schema: params_schema });
-          await db('prompts').insert({
-            id: argGenId, project_id: projectId, pipeline_id: promptId, type: 'llm',
-            prompt: argGenPrompt, response: JSON.stringify(args || argError),
-            messages: JSON.stringify(argGenMsgs), skill_id: skill.id,
-            personality_id: personality.id, status: argError ? 'error' : 'completed',
+          await db('prompts').where('id', argGenId).update({
+            response: JSON.stringify(args || argError), messages: JSON.stringify(argGenMsgs),
+            status: argError ? 'error' : 'completed', error: argError || null, updated_at: db.fn.now(),
           });
-          if (lastChildId) {
-            await db('prompt_context').insert({ prompt_id: argGenId, ref_type: 'prompt', ref_id: lastChildId });
-          }
           broadcast(projectId, { type: 'prompt-status', promptId: argGenId, status: argError ? 'error' : 'completed' });
+          broadcastStage(projectId, promptId, argGenId, argError ? 'error' : 'completed', activeStageLabel, argError);
+          activeChildId = null;
+          activeStageLabel = null;
           lastChildId = argGenId;
 
           if (argError || !args) {
@@ -436,16 +461,13 @@ export async function processPrompt(db: Knex, projectId: string, promptId: strin
             });
             await db('prompt_context').insert({ prompt_id: toolCallId, ref_type: 'prompt', ref_id: lastChildId });
             broadcast(projectId, { type: 'prompt-status', promptId: toolCallId, status: 'error', error: argError });
+            broadcastStage(projectId, promptId, toolCallId, 'error', `tool ${skill.tool_name}`, argError || 'Failed to generate tool arguments');
             lastChildId = toolCallId;
             continue;
           }
 
           // Resolve file base64 if args reference filenames
           const resolvedArgs = await resolveFileArgs(args, files);
-
-          // Execute tool
-          const toolResult = await executeToolViaWorker(skill.tool_name, resolvedArgs);
-          const toolResultJson = JSON.stringify(toolResult);
 
           const resolvedInfo = Object.keys(resolvedArgs).reduce((acc, k) => {
             if (typeof resolvedArgs[k] === 'string' && resolvedArgs[k] !== (args as any)[k]) {
@@ -456,13 +478,26 @@ export async function processPrompt(db: Knex, projectId: string, promptId: strin
             return acc;
           }, {} as Record<string, unknown>);
 
+          activeChildId = toolCallId;
+          activeStageLabel = `tool ${skill.tool_name}`;
           await db('prompts').insert({
             id: toolCallId, project_id: projectId, pipeline_id: promptId, type: 'tool',
-            prompt: `${skill.tool_name} ${JSON.stringify(resolvedInfo)}`, response: toolResultJson,
-            skill_id: skill.id, personality_id: personality.id, status: 'completed',
+            prompt: `${skill.tool_name} ${JSON.stringify(resolvedInfo)}`, response: '',
+            skill_id: skill.id, personality_id: personality.id, status: 'processing',
           });
           await db('prompt_context').insert({ prompt_id: toolCallId, ref_type: 'prompt', ref_id: lastChildId });
+          broadcast(projectId, { type: 'prompt-status', promptId: toolCallId, status: 'processing' });
+          broadcastStage(projectId, promptId, toolCallId, 'processing', activeStageLabel);
+
+          // Execute tool
+          const toolResult = await executeToolViaWorker(skill.tool_name, resolvedArgs);
+          const toolResultJson = JSON.stringify(toolResult);
+
+          await db('prompts').where('id', toolCallId).update({ response: toolResultJson, status: 'completed', updated_at: db.fn.now() });
           broadcast(projectId, { type: 'prompt-status', promptId: toolCallId, status: 'completed' });
+          broadcastStage(projectId, promptId, toolCallId, 'completed', activeStageLabel);
+          activeChildId = null;
+          activeStageLabel = null;
           lastChildId = toolCallId;
         }
 
@@ -470,6 +505,8 @@ export async function processPrompt(db: Knex, projectId: string, promptId: strin
         if (abortController.signal.aborted || await isCancelled(db, promptId)) throw new Error('AbortError');
 
         const skillPromptId = uuidv4();
+        activeChildId = skillPromptId;
+        activeStageLabel = `llm ${skill.name}`;
         await db('prompts').insert({
           id: skillPromptId, project_id: projectId, pipeline_id: promptId, type: 'llm',
           prompt: skill.system_prompt, skill_id: skill.id,
@@ -481,6 +518,7 @@ export async function processPrompt(db: Knex, projectId: string, promptId: strin
         }
 
         broadcast(projectId, { type: 'prompt-status', promptId: skillPromptId, status: 'processing' });
+    broadcastStage(projectId, promptId, skillPromptId, 'processing', activeStageLabel);
 
         const chainContext = (await unwindContext(db, skillPromptId)).map((c: any) => ({ ...c, _current: true }));
         const fullContext = [...projectContext, ...chainContext];
@@ -498,6 +536,9 @@ export async function processPrompt(db: Knex, projectId: string, promptId: strin
 
         await db('prompts').where('id', skillPromptId).update({ response: output, status: 'completed', updated_at: db.fn.now() });
         broadcast(projectId, { type: 'prompt-status', promptId: skillPromptId, status: 'completed' });
+          broadcastStage(projectId, promptId, skillPromptId, 'completed', activeStageLabel);
+        activeChildId = null;
+          activeStageLabel = null;
         lastChildId = skillPromptId;
       }
     }
@@ -506,6 +547,8 @@ export async function processPrompt(db: Knex, projectId: string, promptId: strin
     if (abortController.signal.aborted || await isCancelled(db, promptId)) throw new Error('AbortError');
 
     const finalId = uuidv4();
+    activeChildId = finalId;
+    activeStageLabel = 'llm final response';
     await db('prompts').insert({
       id: finalId, project_id: projectId, pipeline_id: promptId, type: 'llm',
       prompt: currentPrompt.prompt, personality_id: personality.id, status: 'processing',
@@ -516,6 +559,7 @@ export async function processPrompt(db: Knex, projectId: string, promptId: strin
     }
 
     broadcast(projectId, { type: 'prompt-status', promptId: finalId, status: 'processing' });
+    broadcastStage(projectId, promptId, finalId, 'processing', activeStageLabel);
 
     const chainContext = (await unwindContext(db, finalId)).map((c: any) => ({ ...c, _current: true }));
     const fullContext = [...projectContext, ...chainContext];
@@ -526,12 +570,15 @@ export async function processPrompt(db: Knex, projectId: string, promptId: strin
     let finalOutput = '';
     await callLLMStream(msgs, async (chunk: string) => {
       finalOutput += chunk;
-      broadcast(projectId, { type: 'prompt-chunk', promptId: finalId, chunk, fullContent: finalOutput });
+      broadcast(projectId, { type: 'prompt-chunk', promptId: finalId, pipelineId: promptId, chunk, fullContent: finalOutput });
       if (await isCancelled(db, promptId)) abortController.abort();
     }, abortController.signal);
 
     await db('prompts').where('id', finalId).update({ response: finalOutput, status: 'completed', updated_at: db.fn.now() });
     broadcast(projectId, { type: 'prompt-status', promptId: finalId, status: 'completed' });
+    broadcastStage(projectId, promptId, finalId, 'completed', activeStageLabel);
+    activeChildId = null;
+    activeStageLabel = null;
 
     // Pipeline parent done
     await db('prompts').where('id', promptId).update({ status: 'completed', updated_at: db.fn.now() });
@@ -539,10 +586,20 @@ export async function processPrompt(db: Knex, projectId: string, promptId: strin
 
   } catch (err: any) {
     if (err.name === 'AbortError' || err.message === 'AbortError' || abortController.signal.aborted) {
+      if (activeChildId) {
+        await db('prompts').where('id', activeChildId).update({ status: 'stopped', updated_at: db.fn.now() });
+        broadcast(projectId, { type: 'prompt-status', promptId: activeChildId, status: 'stopped' });
+        broadcastStage(projectId, promptId, activeChildId, 'stopped', activeStageLabel || 'stage stopped');
+      }
       await db('prompts').where('id', promptId).update({ status: 'stopped', updated_at: db.fn.now() });
       broadcast(projectId, { type: 'prompt-status', promptId, status: 'stopped' });
     } else {
       const errorMsg = err.message || 'Unknown error';
+      if (activeChildId) {
+        await db('prompts').where('id', activeChildId).update({ status: 'error', error: errorMsg, updated_at: db.fn.now() });
+        broadcast(projectId, { type: 'prompt-status', promptId: activeChildId, status: 'error', error: errorMsg });
+        broadcastStage(projectId, promptId, activeChildId, 'error', activeStageLabel || 'stage failed', errorMsg);
+      }
       await db('prompts').where('id', promptId).update({ status: 'error', error: errorMsg, updated_at: db.fn.now() });
       broadcast(projectId, { type: 'prompt-status', promptId, status: 'error', error: errorMsg });
     }

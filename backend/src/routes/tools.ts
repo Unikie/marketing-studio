@@ -4,6 +4,8 @@ const router = Router();
 
 const PYWORKER_URL = process.env.PYWORKER_URL || 'http://localhost:3002';
 
+type ToolRouteParams = { name: string };
+
 // LIST all tools
 router.get('/', async (_req: Request, res: Response) => {
   try {
@@ -16,7 +18,7 @@ router.get('/', async (_req: Request, res: Response) => {
 });
 
 // GET single tool
-router.get('/:name', async (req: Request, res: Response) => {
+router.get('/:name', async (req: Request<ToolRouteParams>, res: Response) => {
   try {
     const r = await fetch(`${PYWORKER_URL}/tools/${encodeURIComponent(req.params.name)}`, {
       headers: { 'X-Caller': 'system' },
@@ -44,7 +46,7 @@ router.post('/', async (req: Request, res: Response) => {
 });
 
 // UPDATE tool
-router.put('/:name', async (req: Request, res: Response) => {
+router.put('/:name', async (req: Request<ToolRouteParams>, res: Response) => {
   try {
     const r = await fetch(`${PYWORKER_URL}/tools/${encodeURIComponent(req.params.name)}`, {
       method: 'PUT',
@@ -59,7 +61,7 @@ router.put('/:name', async (req: Request, res: Response) => {
 });
 
 // DELETE tool
-router.delete('/:name', async (req: Request, res: Response) => {
+router.delete('/:name', async (req: Request<ToolRouteParams>, res: Response) => {
   try {
     const r = await fetch(`${PYWORKER_URL}/tools/${encodeURIComponent(req.params.name)}`, {
       method: 'DELETE',

@@ -52,6 +52,47 @@ function findNewestLeaf(topLevel: PromptData[], childrenMap: Map<string | null, 
   }
 }
 
+function formatPipelineStage(stage: PromptData): string {
+  const skill = stage.skill?.trim();
+  if (stage.type === 'tool') {
+    const prompt = stage.prompt || '';
+    if (prompt.startsWith('file_analysis:')) return `tool ${prompt}`;
+    const toolName = prompt.split(/\s+/)[0] || 'tool';
+    return `tool ${toolName.replace(/:$/, '')}`;
+  }
+  if (stage.type === 'llm') {
+    if (skill) return `llm ${skill}`;
+    return 'llm final response';
+  }
+  return skill ? `${stage.type} ${skill}` : stage.type;
+}
+
+type PipelineProgress = { label: string; error?: string };
+
+function getPipelineProgress(parent: PromptData, prompts: PromptData[]): PipelineProgress | null {
+  if (parent.type !== 'pipeline') return null;
+  const children = prompts
+    .filter(child => child.pipeline_id === parent.id)
+    .sort((a, b) => a.created_at.localeCompare(b.created_at));
+  const latestChildren = [...children].reverse();
+
+  if (parent.status === 'error') {
+    const failed = latestChildren.find(child => child.status === 'error') || latestChildren[0];
+    const label = failed ? formatPipelineStage(failed) : 'stage failed';
+    return { label, error: failed?.error || parent.error || 'Pipeline failed' };
+  }
+
+  if (parent.status !== 'processing' && parent.status !== 'pending') return null;
+
+  const current = latestChildren.find(child => child.status === 'processing' || child.status === 'pending');
+  if (current) return { label: formatPipelineStage(current) };
+
+  const failed = latestChildren.find(child => child.status === 'error');
+  if (failed) return { label: formatPipelineStage(failed), error: failed.error || 'Stage failed' };
+
+  return null;
+}
+
 export default function Project() {
   const { id } = useParams<{ id: string }>();
   const [project, setProject] = useState<ProjectData | null>(null);
@@ -61,6 +102,7 @@ export default function Project() {
   const [sending, setSending] = useState(false);
   const [streamingPromptId, setStreamingPromptId] = useState<string | null>(null);
   const [streamContent, setStreamContent] = useState('');
+  const [pipelineStages, setPipelineStages] = useState<Record<string, PipelineProgress>>({});
 
   const [editingPromptId, setEditingPromptId] = useState<string | null>(null);
   const [viewMode, setViewMode] = useState<'history' | 'debug'>('history');
@@ -73,8 +115,19 @@ export default function Project() {
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   const isNearBottomRef = useRef(true);
   const { lastEvent } = useSSE(id);
+  const promptsRef = useRef<PromptData[]>([]);
+  const pipelineClearTimersRef = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
   const location = useLocation();
   const incomingHandled = useRef(false);
+
+  useEffect(() => { promptsRef.current = prompts; }, [prompts]);
+
+  useEffect(() => {
+    return () => {
+      Object.values(pipelineClearTimersRef.current).forEach(clearTimeout);
+      pipelineClearTimersRef.current = {};
+    };
+  }, []);
 
   useEffect(() => {
     if (!id) return;
@@ -114,19 +167,55 @@ export default function Project() {
 
   useEffect(() => {
     if (!lastEvent) return;
+    if (lastEvent.type === 'pipeline-stage') {
+      const pipelineId = lastEvent.pipelineId as string | undefined;
+      if (pipelineId) {
+        const pendingClear = pipelineClearTimersRef.current[pipelineId];
+        if (pendingClear) {
+          clearTimeout(pendingClear);
+          delete pipelineClearTimersRef.current[pipelineId];
+        }
+        setPipelineStages(prev => ({
+          ...prev,
+          [pipelineId]: {
+            label: lastEvent.label || 'pipeline stage',
+            error: lastEvent.status === 'error' ? lastEvent.error || 'Stage failed' : undefined,
+          },
+        }));
+      }
+    }
     if (lastEvent.type === 'prompt-chunk') {
-      setStreamingPromptId(lastEvent.promptId);
-      setStreamContent(lastEvent.fullContent || '');
+      const eventPrompt = promptsRef.current.find(p => p.id === lastEvent.promptId);
+      const isFinalPipelineChunk = lastEvent.pipelineId || (eventPrompt?.pipeline_id && eventPrompt.type === 'llm' && !eventPrompt.skill);
+      if (!eventPrompt?.pipeline_id || isFinalPipelineChunk) {
+        setStreamingPromptId(lastEvent.pipelineId || eventPrompt?.pipeline_id || lastEvent.promptId);
+        setStreamContent(lastEvent.fullContent || '');
+      }
     }
     if (lastEvent.type === 'prompt-status') {
       if (lastEvent.status === 'completed' || lastEvent.status === 'error' || lastEvent.status === 'stopped') {
-        setStreamingPromptId(null);
-        setStreamContent('');
-        setSending(false);
-        loadData();
+        if (lastEvent.promptId === activeLeafId && lastEvent.status === 'completed') {
+          const promptId = lastEvent.promptId;
+          const pendingClear = pipelineClearTimersRef.current[promptId];
+          if (pendingClear) clearTimeout(pendingClear);
+          pipelineClearTimersRef.current[promptId] = setTimeout(() => {
+            setPipelineStages(prev => {
+              const next = { ...prev };
+              delete next[promptId];
+              return next;
+            });
+            delete pipelineClearTimersRef.current[promptId];
+          }, 1500);
+        }
+        if (lastEvent.promptId === activeLeafId) {
+          loadData();
+          setStreamingPromptId(null);
+          setStreamContent('');
+          setSending(false);
+        }
       }
     }
-  }, [lastEvent]);
+  }, [lastEvent, activeLeafId]);
 
   const handleScroll = useCallback(() => {
     const el = scrollContainerRef.current;
@@ -310,6 +399,7 @@ export default function Project() {
           const isStreaming = p.id === streamingPromptId;
           const response = isStreaming ? streamContent : getResponse(p);
           const fileRefs = (p.context || []).filter(c => c.type === 'file');
+          const pipelineProgress = pipelineStages[p.id] || getPipelineProgress(p, prompts);
 
           return (
             <div key={p.id} className="msg-turn" data-prompt-id={p.id}>
@@ -362,7 +452,14 @@ export default function Project() {
                   <span className="msg-time" title={formatMessageDate(p.updated_at || p.created_at).full}>
                     {formatMessageDate(p.updated_at || p.created_at).short}
                   </span>
-                  {p.type === 'pipeline' && <span className="mode-tag">pipeline</span>}
+                  {pipelineProgress && (
+                    <span
+                      className={`pipeline-progress${pipelineProgress.error ? ' error' : ''}`}
+                      title={pipelineProgress.error || pipelineProgress.label}
+                    >
+                      {pipelineProgress.label}
+                    </span>
+                  )}
                 </div>
                 </>
               )}

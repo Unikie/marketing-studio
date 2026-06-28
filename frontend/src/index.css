@@ -834,12 +834,14 @@ input, textarea {
   margin-bottom: 0.3rem;
 }
 
-.mode-tag {
-  font-size: 0.7rem;
-  background: #4361ee;
-  color: white;
-  padding: 0.1rem 0.4rem;
-  border-radius: 8px;
+.pipeline-progress {
+  color: var(--muted);
+  font: inherit;
+  line-height: inherit;
+}
+
+.pipeline-progress.error {
+  color: #e63946;
 }
 
 .edit-btn {
