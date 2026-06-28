@@ -393,6 +393,7 @@ export default function Project() {
         sending={sending}
         showStop={!!streamingPromptId}
         onStop={handleStop}
+        draftKey={id}
         editingBanner={editingPromptId ? (
           <div className="editing-banner">
             <span>✎ Editing prompt (will create a branch)</span>

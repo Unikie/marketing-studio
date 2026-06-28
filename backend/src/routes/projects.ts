@@ -12,6 +12,8 @@ router.post('/', async (req: Request, res: Response) => {
   const id = uuidv4();
   const name = req.body.name || 'Untitled Project';
   await db('projects').insert({ id, name });
+  // Clear the "default" draft (used on the new-prompt page)
+  await db('drafts').where('key', 'default').del();
   const project = await db('projects').where('id', id).first();
   res.status(201).json(project);
 });
@@ -63,6 +65,7 @@ router.delete('/:id', async (req: Request, res: Response) => {
     .del();
   await db('prompts').where('project_id', req.params.id).del();
   await db('files').where('project_id', req.params.id).del();
+  await db('drafts').where('key', req.params.id).del();
   await db('projects').where('id', req.params.id).del();
   res.status(204).end();
 });

@@ -13,10 +13,11 @@ interface PromptProps {
   showStop?: boolean;
   onStop?: () => void;
   editingBanner?: React.ReactNode;
+  draftKey?: string;
 }
 
 const Prompt = forwardRef<PromptHandle, PromptProps>(function Prompt(
-  { onSend, sending, autoFocus, className, showStop, onStop, editingBanner },
+  { onSend, sending, autoFocus, className, showStop, onStop, editingBanner, draftKey },
   ref
 ) {
   const [inputText, setInputText] = useState('');
@@ -35,6 +36,26 @@ const Prompt = forwardRef<PromptHandle, PromptProps>(function Prompt(
     : [];
 
   useEffect(() => { api.getSkills().then(setSkills).catch(() => {}); }, []);
+
+  // Load draft on mount or when draftKey changes
+  const dirtyRef = useRef(false);
+  useEffect(() => {
+    dirtyRef.current = false;
+    setInputText('');
+    if (!draftKey) return;
+    api.getDraft(draftKey).then(d => { if (d.text) setInputText(d.text); }).catch(() => {});
+  }, [draftKey]);
+
+  // Debounce-save draft on text change (only if user edited)
+  const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => {
+    if (!draftKey || !dirtyRef.current) return;
+    if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
+    saveTimerRef.current = setTimeout(() => {
+      api.saveDraft(draftKey, inputText).catch(() => {});
+    }, 500);
+    return () => { if (saveTimerRef.current) clearTimeout(saveTimerRef.current); };
+  }, [inputText, draftKey]);
 
   useEffect(() => {
     const el = textareaRef.current;
@@ -62,6 +83,7 @@ const Prompt = forwardRef<PromptHandle, PromptProps>(function Prompt(
 
   function handleInputChange(e: React.ChangeEvent<HTMLTextAreaElement>) {
     const val = e.target.value;
+    dirtyRef.current = true;
     setInputText(val);
     const cursorPos = e.target.selectionStart;
     const textBeforeCursor = val.slice(0, cursorPos);
@@ -79,6 +101,7 @@ const Prompt = forwardRef<PromptHandle, PromptProps>(function Prompt(
     if (slashMatch) {
       const start = cursorPos - slashMatch[0].length;
       const newText = inputText.slice(0, start) + '/' + skillName + ' ' + inputText.slice(cursorPos);
+      dirtyRef.current = true;
       setInputText(newText);
       setSlashQuery(null);
       setTimeout(() => { el.focus(); el.setSelectionRange(start + skillName.length + 2, start + skillName.length + 2); }, 0);

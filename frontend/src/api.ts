@@ -182,4 +182,14 @@ export const api = {
 
   deleteTool: (name: string): Promise<{ ok: boolean }> =>
     request(`/api/tools/${encodeURIComponent(name)}`, { method: 'DELETE' }),
+
+  // Drafts API
+  getDraft: (key: string): Promise<{ text: string }> => request(`/api/drafts/${encodeURIComponent(key)}`),
+
+  saveDraft: (key: string, text: string): Promise<{ ok: boolean }> =>
+    request(`/api/drafts/${encodeURIComponent(key)}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text }),
+    }),
 };

@@ -131,6 +131,9 @@ router.post('/', async (req: Request, res: Response) => {
     await db('prompt_context').insert({ prompt_id: promptId, ref_type: 'prompt', ref_id: prevPrompt.id });
   }
 
+  // Clear draft for this project
+  await db('drafts').where('key', projectId).del();
+
   const created = await cleanPrompt(db, promptId);
   res.status(201).json(created);
 });

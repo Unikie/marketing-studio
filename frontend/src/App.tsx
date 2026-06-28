@@ -36,7 +36,7 @@ function NewPrompt() {
         <h2>What can I help with?</h2>
       </div>
       <div className="new-prompt-input-wrap">
-        <Prompt onSend={handleSend} sending={sending} autoFocus className="new-prompt-input" />
+        <Prompt onSend={handleSend} sending={sending} autoFocus className="new-prompt-input" draftKey="default" />
       </div>
     </div>
   );
