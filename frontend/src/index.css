@@ -1131,6 +1131,7 @@ input, textarea {
 /* ---- Settings page ---- */
 
 .settings-page {
+  width: 100%;
   max-width: 700px;
   margin: 0 auto;
   padding: 1rem;
@@ -1321,29 +1322,153 @@ input, textarea {
   resize: vertical;
 }
 
-/* Instructions page */
-.instruction-textarea {
+/* Instructions tab (in settings) */
+.instr-tab {
   width: 100%;
-  min-height: 200px;
-  resize: vertical;
+  padding-top: 0.5rem;
+}
+
+.instr-version-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 0.5rem;
+}
+
+.instr-nav {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.instr-nav-btn {
+  background: none;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 0.75rem;
+  padding: 0.15rem 0.4rem;
+  color: var(--fg);
+  line-height: 1;
+}
+
+.instr-nav-btn:disabled {
+  opacity: 0.3;
+  cursor: default;
+}
+
+.instr-nav-label {
+  font-size: 0.8rem;
+  color: var(--muted);
+  min-width: 2.5rem;
+  text-align: center;
+}
+
+.instr-edit-actions {
+  display: flex;
+  gap: 0.3rem;
+}
+
+.instr-save-btn, .instr-cancel-btn {
+  background: none;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 0.75rem;
+  padding: 0.15rem 0.4rem;
+  color: var(--fg);
+  line-height: 1;
+}
+
+.instr-save-btn:hover { border-color: var(--accent); color: var(--accent); }
+.instr-cancel-btn:hover { border-color: #e63946; color: #e63946; }
+.instr-save-btn:disabled { opacity: 0.3; cursor: default; }
+
+.instr-turn {
+  position: relative;
+}
+
+.instr-bubble {
+  position: relative;
+}
+
+.instr-bubble .instr-edit-icon {
+  position: absolute;
+  top: 0.5rem;
+  right: 0.5rem;
+  background: var(--user-msg-bg);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 0.25rem;
+  cursor: pointer;
+  color: var(--muted);
+  opacity: 0;
+  transition: opacity 0.15s;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+}
+
+.instr-turn:hover .instr-edit-icon {
+  opacity: 1;
+}
+
+.instr-bubble .instr-edit-icon:hover {
+  color: var(--accent);
+  border-color: var(--accent);
+}
+
+.instr-body {
+  white-space: pre-wrap;
   font-family: monospace;
-  font-size: 0.9rem;
-  padding: 0.75rem;
-  border: 1px solid #ddd;
-  border-radius: 6px;
+  font-size: 0.85rem;
   line-height: 1.5;
 }
 
-.instruction-actions {
-  display: flex;
-  align-items: center;
-  gap: 0.75rem;
-  margin-top: 0.75rem;
+.instr-inline-textarea {
+  width: 100%;
+  min-height: 200px;
+  resize: none;
+  overflow: hidden;
+  font-family: monospace;
+  font-size: 0.85rem;
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: var(--fg);
+  line-height: 1.5;
+  outline: none;
 }
 
-.unsaved-hint {
+.instr-turn.instr-editing .msg-bubble {
+  outline: 1px solid var(--accent);
+  outline-offset: 0;
+}
+
+.instr-projects {
+  margin-top: 0.75rem;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.4rem;
   font-size: 0.8rem;
-  color: #e63946;
+}
+
+.instr-projects-label {
+  color: var(--muted);
+}
+
+.instr-project-link {
+  color: var(--accent);
+  text-decoration: none;
+  padding: 0.1rem 0.4rem;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  font-size: 0.75rem;
+}
+
+.instr-project-link:hover {
+  border-color: var(--accent);
 }
 
 .btn-link {

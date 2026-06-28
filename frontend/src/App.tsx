@@ -2,7 +2,6 @@ import { useState } from 'react';
 import { BrowserRouter, Routes, Route, useNavigate, useLocation } from 'react-router-dom';
 import Project from './pages/Project';
 import Settings from './pages/Settings';
-import Instructions from './pages/Instructions';
 import Sidebar from './components/Sidebar';
 import Prompt from './components/Prompt';
 import { api } from './api';
@@ -53,7 +52,6 @@ function AppLayout() {
             <Route path="/" element={<NewPrompt />} />
             <Route path="/projects/:id" element={<Project />} />
             <Route path="/settings" element={<Settings />} />
-            <Route path="/instructions" element={<Instructions />} />
           </Routes>
         </main>
       </div>

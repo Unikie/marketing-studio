@@ -1,7 +1,18 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { Link } from 'react-router-dom';
-import { api, Skill, Tool } from '../api';
+import { api, Skill, Tool, SystemInstruction } from '../api';
 import CodeEditor from '../components/CodeEditor';
+
+function formatDate(iso: string): { short: string; full: string } {
+  const d = new Date(iso);
+  const now = new Date();
+  const full = d.toLocaleString([], { hour12: false });
+  const isToday = d.toDateString() === now.toDateString();
+  const short = isToday
+    ? d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false })
+    : d.toLocaleDateString([], { month: 'short', day: 'numeric' });
+  return { short, full };
+}
 
 type Tab = 'instructions' | 'tools' | 'skills';
 
@@ -10,6 +21,15 @@ export default function Settings() {
   const [skills, setSkills] = useState<Skill[]>([]);
   const [tools, setTools] = useState<Tool[]>([]);
   const [loading, setLoading] = useState(true);
+
+  // Instructions state
+  const [instrVersions, setInstrVersions] = useState<SystemInstruction[]>([]);
+  const [instrIndex, setInstrIndex] = useState(0);
+  const [instrText, setInstrText] = useState('');
+  const [instrEditing, setInstrEditing] = useState(false);
+  const [instrSaving, setInstrSaving] = useState(false);
+  const [instrProjects, setInstrProjects] = useState<{ id: string; name: string }[]>([]);
+  const instrTextareaRef = useRef<HTMLTextAreaElement>(null);
 
   // New skill form
   const [newName, setNewName] = useState('');
@@ -40,7 +60,7 @@ export default function Settings() {
   const [showNewSkill, setShowNewSkill] = useState(false);
   const [showNewTool, setShowNewTool] = useState(false);
 
-  useEffect(() => { loadAll(); }, []);
+  useEffect(() => { loadAll(); loadInstrVersions(); }, []);
 
   async function loadAll() {
     try {
@@ -49,6 +69,85 @@ export default function Settings() {
       setTools(t);
     } finally { setLoading(false); }
   }
+
+  // ---- Instructions ----
+  async function loadInstrVersions() {
+    try {
+      const v = await api.getInstructionVersions();
+      setInstrVersions(v);
+      if (v.length > 0) {
+        const lastIdx = v.length - 1;
+        setInstrIndex(lastIdx);
+        setInstrText(v[lastIdx].text);
+        loadInstrProjects(v[lastIdx].id);
+      }
+    } catch (err) { console.error('Failed to load instructions:', err); }
+  }
+
+  async function loadInstrProjects(versionId: string) {
+    try {
+      const p = await api.getInstructionProjects(versionId);
+      setInstrProjects(p);
+    } catch { setInstrProjects([]); }
+  }
+
+  function instrNavigate(dir: number) {
+    const newIdx = instrIndex + dir;
+    if (newIdx < 0 || newIdx >= instrVersions.length) return;
+    setInstrIndex(newIdx);
+    setInstrText(instrVersions[newIdx].text);
+    setInstrEditing(false);
+    loadInstrProjects(instrVersions[newIdx].id);
+  }
+
+  async function instrSave() {
+    if (!instrText.trim() || instrSaving) return;
+    setInstrSaving(true);
+    try {
+      const created = await api.updateInstruction(instrText.trim());
+      const updated = [...instrVersions, created];
+      setInstrVersions(updated);
+      setInstrIndex(updated.length - 1);
+      setInstrText(created.text);
+      setInstrEditing(false);
+      loadInstrProjects(created.id);
+    } catch (err) {
+      console.error('Failed to save:', err);
+      alert('Failed to save system instruction');
+    } finally { setInstrSaving(false); }
+  }
+
+  function instrCancelEdit() {
+    setInstrEditing(false);
+    if (instrVersions[instrIndex]) setInstrText(instrVersions[instrIndex].text);
+  }
+
+  const instrCurrent = instrVersions[instrIndex];
+  const instrHasChanges = instrCurrent && instrText.trim() !== instrCurrent.text;
+
+  useEffect(() => {
+    const el = instrTextareaRef.current;
+    if (el) { el.style.height = 'auto'; el.style.height = el.scrollHeight + 'px'; }
+  }, [instrText, instrEditing]);
+
+  useEffect(() => {
+    if (!instrEditing) return;
+    const el = instrTextareaRef.current;
+    if (!el) return;
+    const container = el.parentElement;
+    if (!container) return;
+    let prevWidth = container.clientWidth;
+    const ro = new ResizeObserver(() => {
+      const newWidth = container.clientWidth;
+      if (newWidth !== prevWidth) {
+        prevWidth = newWidth;
+        el.style.height = 'auto';
+        el.style.height = el.scrollHeight + 'px';
+      }
+    });
+    ro.observe(container);
+    return () => ro.disconnect();
+  }, [instrEditing]);
 
   // ---- Skills ----
   async function handleCreateSkill() {
@@ -135,10 +234,59 @@ export default function Settings() {
 
       {/* ===== INSTRUCTIONS TAB ===== */}
       {tab === 'instructions' && (
-        <div className="card">
-          <h3>System Instructions</h3>
-          <p className="hint">Base system prompt for all LLM calls.</p>
-          <Link to="/instructions" className="primary btn-link">Edit System Instructions</Link>
+        <div className="instr-tab">
+          <div className="instr-version-bar">
+            <div className="instr-nav">
+              <button className="instr-nav-btn" disabled={instrIndex === 0} onClick={() => instrNavigate(-1)}>‹‹</button>
+              <span className="instr-nav-label">{instrVersions.length > 0 ? `${instrIndex + 1}/${instrVersions.length}` : '0/0'}</span>
+              <button className="instr-nav-btn" disabled={instrIndex >= instrVersions.length - 1} onClick={() => instrNavigate(1)}>››</button>
+            </div>
+            {instrEditing && (
+              <div className="instr-edit-actions">
+                <button className="instr-save-btn" onClick={instrSave} disabled={instrSaving || !instrHasChanges || !instrText.trim()}>
+                  {instrSaving ? '…' : '✓'}
+                </button>
+                <button className="instr-cancel-btn" onClick={instrCancelEdit}>✕</button>
+              </div>
+            )}
+          </div>
+
+          <div className={`msg-turn instr-turn${instrEditing ? ' instr-editing' : ''}`}>
+            <div className="msg-bubble user-msg instr-bubble">
+              {!instrEditing && (
+                <button className="instr-edit-icon" onClick={() => setInstrEditing(true)} title="Edit (creates new version)">
+                  <svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor"><path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zM20.71 7.04a1.003 1.003 0 000-1.42l-2.34-2.33a1.003 1.003 0 00-1.42 0l-1.83 1.83 3.75 3.75 1.84-1.83z"/></svg>
+                </button>
+              )}
+              {instrEditing ? (
+                <textarea
+                  ref={instrTextareaRef}
+                  className="instr-inline-textarea"
+                  value={instrText}
+                  onChange={e => setInstrText(e.target.value)}
+                  autoFocus
+                />
+              ) : (
+                <div className="msg-body instr-body">{instrText || <span className="hint">No instructions yet.</span>}</div>
+              )}
+            </div>
+            <div className="msg-meta">
+              {instrCurrent && (
+                <span className="msg-time" title={formatDate(instrCurrent.created_at).full}>
+                  {formatDate(instrCurrent.created_at).short}
+                </span>
+              )}
+            </div>
+          </div>
+
+          {instrProjects.length > 0 && (
+            <div className="instr-projects">
+              <span className="instr-projects-label">Used by:</span>
+              {instrProjects.map(p => (
+                <Link key={p.id} to={`/projects/${p.id}`} className="instr-project-link">{p.name}</Link>
+              ))}
+            </div>
+          )}
         </div>
       )}
 

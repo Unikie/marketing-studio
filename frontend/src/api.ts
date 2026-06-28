@@ -159,6 +159,11 @@ export const api = {
       body: JSON.stringify({ text }),
     }),
 
+  getInstructionVersions: (): Promise<SystemInstruction[]> => request('/api/instructions/versions'),
+
+  getInstructionProjects: (id: string): Promise<{ id: string; name: string }[]> =>
+    request(`/api/instructions/versions/${encodeURIComponent(id)}/projects`),
+
   getSSEUrl: (projectId: string): string => `${BASE_URL}/api/events/${projectId}`,
 
   // Tools API (pyworker proxy)
