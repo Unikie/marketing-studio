@@ -324,24 +324,24 @@ export default function Project() {
                   </div>
                 )}
               </div>
-              <div className="msg-meta">
-                <div className="msg-actions">
-                  <button className="edit-btn" onClick={() => startEdit(p)} title="Edit (creates branch)">✎</button>
-                  {(p.status === 'completed' || p.status === 'stopped' || p.status === 'error') && !isStreaming && (
-                    <button className="retry-btn" onClick={() => handleRetry(p)} title="Retry (creates branch)">↻</button>
-                  )}
-                </div>
+              <div className="msg-meta history-meta">
                 <span className="msg-time" title={formatMessageDate(p.updated_at || p.created_at).full}>
                   {formatMessageDate(p.updated_at || p.created_at).short}
                 </span>
-              </div>
-              {hasBranches && (
-                <div className="branch-selector">
-                  <button className="branch-btn" disabled={sibIdx === 0} onClick={() => switchBranch(p, -1)}>‹</button>
-                  <span className="branch-label">{sibIdx + 1}/{siblings.length}</span>
-                  <button className="branch-btn" disabled={sibIdx === siblings.length - 1} onClick={() => switchBranch(p, 1)}>›</button>
+                {hasBranches && (
+                  <div className="branch-selector" aria-label="Prompt branches">
+                    <button className="branch-btn" disabled={sibIdx === 0} onClick={() => switchBranch(p, -1)}>{'<'}</button>
+                    <span className="branch-label">{sibIdx + 1}/{siblings.length}</span>
+                    <button className="branch-btn" disabled={sibIdx === siblings.length - 1} onClick={() => switchBranch(p, 1)}>{'>'}</button>
+                  </div>
+                )}
+                <div className="msg-actions history-actions">
+                  {(p.status === 'completed' || p.status === 'stopped' || p.status === 'error') && !isStreaming && (
+                    <button className="retry-btn" onClick={() => handleRetry(p)} title="Retry (creates branch)">↻</button>
+                  )}
+                  <button className="edit-btn" onClick={() => startEdit(p)} title="Edit (creates branch)">✎</button>
                 </div>
-              )}
+              </div>
 
               {(response || p.status === 'processing' || p.status === 'pending' || p.status === 'error' || p.status === 'stopped') && (
                 <>
@@ -358,11 +358,11 @@ export default function Project() {
                     </div>
                   )}
                 </div>
-                <div className="msg-meta assistant-meta">
-                  {p.type === 'pipeline' && <span className="mode-tag">pipeline</span>}
+                <div className="msg-meta assistant-meta history-meta">
                   <span className="msg-time" title={formatMessageDate(p.updated_at || p.created_at).full}>
                     {formatMessageDate(p.updated_at || p.created_at).short}
                   </span>
+                  {p.type === 'pipeline' && <span className="mode-tag">pipeline</span>}
                 </div>
                 </>
               )}

@@ -672,7 +672,6 @@ input, textarea {
 .branch-label {
   font-size: 0.75rem;
   color: #888;
-  min-width: 30px;
   text-align: center;
 }
 
@@ -720,6 +719,24 @@ input, textarea {
   margin-left: auto;
 }
 
+.history-meta .msg-time {
+  margin-left: 0;
+}
+
+.history-meta,
+.personality-meta {
+  font-size: 0.7rem;
+  line-height: 1;
+}
+
+.history-meta .branch-selector,
+.history-meta .msg-actions,
+.personality-meta .revision-nav,
+.personality-meta .personality-edit-actions {
+  font: inherit;
+  line-height: inherit;
+}
+
 .assistant-meta {
   justify-content: flex-start;
 }
@@ -730,6 +747,62 @@ input, textarea {
   gap: 0.2rem;
   opacity: 0;
   transition: opacity 0.15s;
+}
+
+.history-actions {
+  gap: 0.25rem;
+  margin-left: auto;
+}
+
+.history-meta .branch-selector,
+.revision-nav {
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 0;
+  padding: 0;
+  color: var(--muted);
+  opacity: 0;
+  transition: opacity 0.15s;
+}
+
+.msg-turn:hover .history-meta .branch-selector,
+.history-meta:hover .branch-selector {
+  opacity: 1;
+}
+
+.history-meta .branch-btn,
+.revision-nav-btn,
+.history-actions .retry-btn,
+.history-actions .edit-btn {
+  background: none;
+  border: none;
+  cursor: pointer;
+  font: inherit;
+  padding: 0;
+  color: var(--muted);
+  line-height: inherit;
+  width: auto;
+  height: auto;
+}
+
+.history-meta .branch-btn:hover:not(:disabled),
+.revision-nav-btn:hover:not(:disabled),
+.history-actions .retry-btn:hover,
+.history-actions .edit-btn:hover {
+  color: var(--accent);
+}
+
+.history-meta .branch-label,
+.revision-nav-label {
+  font: inherit;
+  color: var(--muted);
+  text-align: center;
+}
+
+.history-actions .retry-btn,
+.history-actions .edit-btn {
+  font-size: 1.3em;
 }
 
 .user-msg:hover .msg-actions {
@@ -1353,38 +1426,9 @@ input, textarea {
   padding-top: 0.5rem;
 }
 
-.revision-nav {
-  display: flex;
-  align-items: center;
-  gap: 0.25rem;
-  opacity: 0;
-  transition: opacity 0.15s;
-}
-
-.revision-nav-btn {
-  background: none;
-  border: none;
-  cursor: pointer;
-  font-size: 0.75rem;
-  padding: 0 0.2rem;
-  color: var(--muted);
-  line-height: 1;
-}
-
 .revision-nav-btn:disabled {
   opacity: 0.3;
   cursor: default;
-}
-
-.revision-nav-btn:hover:not(:disabled) {
-  color: var(--accent);
-}
-
-.revision-nav-label {
-  font-size: 0.8rem;
-  color: var(--muted);
-  min-width: 2.5rem;
-  text-align: center;
 }
 
 .personality-edit-actions {
