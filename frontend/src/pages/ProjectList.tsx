@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { api, Project } from '../api';
+import { formatDateTime } from '../date';
 
 export default function ProjectList() {
   const [projects, setProjects] = useState<Project[]>([]);
@@ -69,7 +70,7 @@ export default function ProjectList() {
               <div>
                 <strong>{p.name}</strong>
                 <div style={{ fontSize: '0.8rem', color: '#888', marginTop: '0.2rem' }}>
-                  Created: {new Date(p.created_at).toLocaleString()}
+                  Created: {formatDateTime(p.created_at)}
                 </div>
               </div>
               <button className="danger" onClick={e => handleDelete(p.id, e)}>Delete</button>

@@ -4,17 +4,7 @@ import { api, type Project as ProjectData, Prompt as PromptData } from '../api';
 import { useSSE } from '../hooks/useSSE';
 import DebugView from '../components/DebugView';
 import PromptBox, { type PromptHandle } from '../components/Prompt';
-
-function formatTime(iso: string): { short: string; full: string } {
-  const d = new Date(iso);
-  const now = new Date();
-  const full = d.toLocaleString([], { hour12: false });
-  const isToday = d.toDateString() === now.toDateString();
-  const short = isToday
-    ? d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false })
-    : d.toLocaleDateString([], { month: 'short', day: 'numeric' });
-  return { short, full };
-}
+import { formatMessageDate } from '../date';
 
 // --- Tree utilities for prompt_context-based branching ---
 
@@ -341,8 +331,8 @@ export default function Project() {
                     <button className="retry-btn" onClick={() => handleRetry(p)} title="Retry (creates branch)">↻</button>
                   )}
                 </div>
-                <span className="msg-time" title={formatTime(p.updated_at || p.created_at).full}>
-                  {formatTime(p.updated_at || p.created_at).short}
+                <span className="msg-time" title={formatMessageDate(p.updated_at || p.created_at).full}>
+                  {formatMessageDate(p.updated_at || p.created_at).short}
                 </span>
               </div>
               {hasBranches && (
@@ -370,8 +360,8 @@ export default function Project() {
                 </div>
                 <div className="msg-meta assistant-meta">
                   {p.type === 'pipeline' && <span className="mode-tag">pipeline</span>}
-                  <span className="msg-time" title={formatTime(p.updated_at || p.created_at).full}>
-                    {formatTime(p.updated_at || p.created_at).short}
+                  <span className="msg-time" title={formatMessageDate(p.updated_at || p.created_at).full}>
+                    {formatMessageDate(p.updated_at || p.created_at).short}
                   </span>
                 </div>
                 </>

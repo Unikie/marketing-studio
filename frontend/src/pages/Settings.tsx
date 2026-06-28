@@ -2,17 +2,7 @@ import { useState, useEffect, useRef } from 'react';
 import { Link } from 'react-router-dom';
 import { api, Skill, Tool, Personality } from '../api';
 import CodeEditor from '../components/CodeEditor';
-
-function formatDate(iso: string): { short: string; full: string } {
-  const d = new Date(iso);
-  const now = new Date();
-  const full = d.toLocaleString([], { hour12: false });
-  const isToday = d.toDateString() === now.toDateString();
-  const short = isToday
-    ? d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false })
-    : d.toLocaleDateString([], { month: 'short', day: 'numeric' });
-  return { short, full };
-}
+import { formatMessageDate } from '../date';
 
 type Tab = 'personality' | 'tools' | 'skills';
 
@@ -23,13 +13,13 @@ export default function Settings() {
   const [loading, setLoading] = useState(true);
 
   // Personality state
-  const [instrVersions, setInstrVersions] = useState<Personality[]>([]);
-  const [instrIndex, setInstrIndex] = useState(0);
-  const [instrText, setInstrText] = useState('');
-  const [instrEditing, setInstrEditing] = useState(false);
-  const [instrSaving, setInstrSaving] = useState(false);
-  const [instrProjects, setInstrProjects] = useState<{ id: string; name: string }[]>([]);
-  const instrTextareaRef = useRef<HTMLTextAreaElement>(null);
+  const [revisions, setRevisions] = useState<Personality[]>([]);
+  const [revisionIndex, setRevisionIndex] = useState(0);
+  const [personalityText, setPersonalityText] = useState('');
+  const [isEditingPersonality, setIsEditingPersonality] = useState(false);
+  const [isSavingPersonality, setIsSavingPersonality] = useState(false);
+  const [revisionProjects, setRevisionProjects] = useState<{ id: string; name: string }[]>([]);
+  const personalityEditorRef = useRef<HTMLDivElement | null>(null);
 
   // New skill form
   const [newName, setNewName] = useState('');
@@ -60,7 +50,7 @@ export default function Settings() {
   const [showNewSkill, setShowNewSkill] = useState(false);
   const [showNewTool, setShowNewTool] = useState(false);
 
-  useEffect(() => { loadAll(); loadInstrVersions(); }, []);
+  useEffect(() => { loadAll(); loadRevisions(); }, []);
 
   async function loadAll() {
     try {
@@ -71,83 +61,72 @@ export default function Settings() {
   }
 
   // ---- Personality ----
-  async function loadInstrVersions() {
+  async function loadRevisions() {
     try {
       const v = await api.getPersonalityVersions();
-      setInstrVersions(v);
+      setRevisions(v);
       if (v.length > 0) {
         const lastIdx = v.length - 1;
-        setInstrIndex(lastIdx);
-        setInstrText(v[lastIdx].text);
-        loadInstrProjects(v[lastIdx].id);
+        setRevisionIndex(lastIdx);
+        setPersonalityText(v[lastIdx].text);
+        loadRevisionProjects(v[lastIdx].id);
       }
     } catch (err) { console.error('Failed to load personality:', err); }
   }
 
-  async function loadInstrProjects(versionId: string) {
+  async function loadRevisionProjects(versionId: string) {
     try {
       const p = await api.getPersonalityProjects(versionId);
-      setInstrProjects(p);
-    } catch { setInstrProjects([]); }
+      setRevisionProjects(p);
+    } catch { setRevisionProjects([]); }
   }
 
-  function instrNavigate(dir: number) {
-    const newIdx = instrIndex + dir;
-    if (newIdx < 0 || newIdx >= instrVersions.length) return;
-    setInstrIndex(newIdx);
-    setInstrText(instrVersions[newIdx].text);
-    setInstrEditing(false);
-    loadInstrProjects(instrVersions[newIdx].id);
+  function navigateRevision(dir: number) {
+    const newIdx = revisionIndex + dir;
+    if (newIdx < 0 || newIdx >= revisions.length) return;
+    setRevisionIndex(newIdx);
+    setPersonalityText(revisions[newIdx].text);
+    setIsEditingPersonality(false);
+    loadRevisionProjects(revisions[newIdx].id);
   }
 
-  async function instrSave() {
-    if (!instrText.trim() || instrSaving) return;
-    setInstrSaving(true);
+  async function savePersonality() {
+    if (!personalityText.trim() || isSavingPersonality) return;
+    setIsSavingPersonality(true);
     try {
-      const created = await api.updatePersonality(instrText.trim());
-      const updated = [...instrVersions, created];
-      setInstrVersions(updated);
-      setInstrIndex(updated.length - 1);
-      setInstrText(created.text);
-      setInstrEditing(false);
-      loadInstrProjects(created.id);
+      const created = await api.updatePersonality(personalityText.trim());
+      const updated = [...revisions, created];
+      setRevisions(updated);
+      setRevisionIndex(updated.length - 1);
+      setPersonalityText(created.text);
+      setIsEditingPersonality(false);
+      loadRevisionProjects(created.id);
     } catch (err) {
       console.error('Failed to save:', err);
       alert('Failed to save personality');
-    } finally { setInstrSaving(false); }
+    } finally { setIsSavingPersonality(false); }
   }
 
-  function instrCancelEdit() {
-    setInstrEditing(false);
-    if (instrVersions[instrIndex]) setInstrText(instrVersions[instrIndex].text);
+  function cancelPersonalityEdit() {
+    setIsEditingPersonality(false);
+    if (revisions[revisionIndex]) setPersonalityText(revisions[revisionIndex].text);
   }
 
-  const instrCurrent = instrVersions[instrIndex];
-  const instrHasChanges = instrCurrent && instrText.trim() !== instrCurrent.text;
+  const currentRevision = revisions[revisionIndex];
+  const hasPersonalityChanges = currentRevision && personalityText.trim() !== currentRevision.text;
 
   useEffect(() => {
-    const el = instrTextareaRef.current;
-    if (el) { el.style.height = 'auto'; el.style.height = el.scrollHeight + 'px'; }
-  }, [instrText, instrEditing]);
-
-  useEffect(() => {
-    if (!instrEditing) return;
-    const el = instrTextareaRef.current;
+    if (!isEditingPersonality) return;
+    const el = personalityEditorRef.current;
     if (!el) return;
-    const container = el.parentElement;
-    if (!container) return;
-    let prevWidth = container.clientWidth;
-    const ro = new ResizeObserver(() => {
-      const newWidth = container.clientWidth;
-      if (newWidth !== prevWidth) {
-        prevWidth = newWidth;
-        el.style.height = 'auto';
-        el.style.height = el.scrollHeight + 'px';
-      }
-    });
-    ro.observe(container);
-    return () => ro.disconnect();
-  }, [instrEditing]);
+    el.focus();
+    const range = document.createRange();
+    range.selectNodeContents(el);
+    range.collapse(false);
+    const selection = window.getSelection();
+    selection?.removeAllRanges();
+    selection?.addRange(range);
+  }, [isEditingPersonality]);
 
   // ---- Skills ----
   async function handleCreateSkill() {
@@ -234,56 +213,53 @@ export default function Settings() {
 
       {/* ===== PERSONALITY TAB ===== */}
       {tab === 'personality' && (
-        <div className="instr-tab">
-          <div className="instr-version-bar">
-            <div className="instr-nav">
-              <button className="instr-nav-btn" disabled={instrIndex === 0} onClick={() => instrNavigate(-1)}>‹‹</button>
-              <span className="instr-nav-label">{instrVersions.length > 0 ? `${instrIndex + 1}/${instrVersions.length}` : '0/0'}</span>
-              <button className="instr-nav-btn" disabled={instrIndex >= instrVersions.length - 1} onClick={() => instrNavigate(1)}>››</button>
-            </div>
-            {instrEditing && (
-              <div className="instr-edit-actions">
-                <button className="instr-save-btn" onClick={instrSave} disabled={instrSaving || !instrHasChanges || !instrText.trim()}>
-                  {instrSaving ? '…' : '✓'}
-                </button>
-                <button className="instr-cancel-btn" onClick={instrCancelEdit}>✕</button>
-              </div>
-            )}
-          </div>
-
-          <div className={`msg-turn instr-turn${instrEditing ? ' instr-editing' : ''}`}>
-            <div className="msg-bubble user-msg instr-bubble">
-              {!instrEditing && (
-                <button className="instr-edit-icon" onClick={() => setInstrEditing(true)} title="Edit (creates new version)">
+        <div className="personality-tab">
+          <div className={`msg-turn personality-turn${isEditingPersonality ? ' personality-editing' : ''}`}>
+            <div className="msg-bubble user-msg personality-bubble">
+              {!isEditingPersonality && (
+                <button className="personality-edit-icon" onClick={() => setIsEditingPersonality(true)} title="Edit (creates new revision)">
                   <svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor"><path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zM20.71 7.04a1.003 1.003 0 000-1.42l-2.34-2.33a1.003 1.003 0 00-1.42 0l-1.83 1.83 3.75 3.75 1.84-1.83z"/></svg>
                 </button>
               )}
-              {instrEditing ? (
-                <textarea
-                  ref={instrTextareaRef}
-                  className="instr-inline-textarea"
-                  value={instrText}
-                  onChange={e => setInstrText(e.target.value)}
-                  autoFocus
-                />
-              ) : (
-                <div className="msg-body instr-body">{instrText || <span className="hint">No personality yet.</span>}</div>
-              )}
+              <div
+                ref={personalityEditorRef}
+                className="msg-body personality-body"
+                contentEditable={isEditingPersonality}
+                suppressContentEditableWarning
+                onInput={e => setPersonalityText(e.currentTarget.textContent || '')}
+              >
+                {personalityText || (!isEditingPersonality ? <span className="hint">No personality yet.</span> : '')}
+              </div>
             </div>
-            <div className="msg-meta">
-              {instrCurrent && (
-                <span className="msg-time" title={formatDate(instrCurrent.created_at).full}>
-                  {formatDate(instrCurrent.created_at).short}
+            <div className="msg-meta personality-meta">
+              {currentRevision && (
+                <span className="msg-time" title={formatMessageDate(currentRevision.created_at).full}>
+                  {formatMessageDate(currentRevision.created_at).short}
                 </span>
+              )}
+              {revisions.length > 1 && (
+                <div className="revision-nav" aria-label="Personality revisions">
+                  <button className="revision-nav-btn" disabled={revisionIndex === 0} onClick={() => navigateRevision(-1)}>{'<'}</button>
+                  <span className="revision-nav-label">{revisionIndex + 1}/{revisions.length}</span>
+                  <button className="revision-nav-btn" disabled={revisionIndex >= revisions.length - 1} onClick={() => navigateRevision(1)}>{'>'}</button>
+                </div>
+              )}
+              {isEditingPersonality && (
+                <div className="personality-edit-actions">
+                  <button className="personality-save-btn" onClick={savePersonality} disabled={isSavingPersonality || !hasPersonalityChanges || !personalityText.trim()}>
+                    {isSavingPersonality ? '…' : '✓'}
+                  </button>
+                  <button className="personality-cancel-btn" onClick={cancelPersonalityEdit}>✕</button>
+                </div>
               )}
             </div>
           </div>
 
-          {instrProjects.length > 0 && (
-            <div className="instr-projects">
-              <span className="instr-projects-label">used in:</span>
-              {instrProjects.map(p => (
-                <Link key={p.id} to={`/projects/${p.id}`} className="instr-project-link">{p.name}</Link>
+          {revisionProjects.length > 0 && (
+            <div className="revision-projects">
+              <span className="revision-projects-label">used in:</span>
+              {revisionProjects.map(p => (
+                <Link key={p.id} to={`/projects/${p.id}`} className="revision-project-link">{p.name}</Link>
               ))}
             </div>
           )}

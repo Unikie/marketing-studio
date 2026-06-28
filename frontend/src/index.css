@@ -1322,54 +1322,56 @@ input, textarea {
   resize: vertical;
 }
 
-/* Instructions tab (in settings) */
-.instr-tab {
+/* Personality tab (in settings) */
+.personality-tab {
   width: 100%;
   padding-top: 0.5rem;
 }
 
-.instr-version-bar {
+.revision-nav {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  margin-bottom: 0.5rem;
+  gap: 0.25rem;
+  opacity: 0;
+  transition: opacity 0.15s;
 }
 
-.instr-nav {
-  display: flex;
-  align-items: center;
-  gap: 0.4rem;
-}
-
-.instr-nav-btn {
+.revision-nav-btn {
   background: none;
-  border: 1px solid var(--border);
-  border-radius: 4px;
+  border: none;
   cursor: pointer;
   font-size: 0.75rem;
-  padding: 0.15rem 0.4rem;
-  color: var(--fg);
+  padding: 0 0.2rem;
+  color: var(--muted);
   line-height: 1;
 }
 
-.instr-nav-btn:disabled {
+.revision-nav-btn:disabled {
   opacity: 0.3;
   cursor: default;
 }
 
-.instr-nav-label {
+.revision-nav-btn:hover:not(:disabled) {
+  color: var(--accent);
+}
+
+.revision-nav-label {
   font-size: 0.8rem;
   color: var(--muted);
   min-width: 2.5rem;
   text-align: center;
 }
 
-.instr-edit-actions {
+.personality-edit-actions {
   display: flex;
   gap: 0.3rem;
 }
 
-.instr-save-btn, .instr-cancel-btn {
+.personality-meta .personality-edit-actions {
+  margin-left: auto;
+}
+
+.personality-save-btn, .personality-cancel-btn {
   background: none;
   border: 1px solid var(--border);
   border-radius: 4px;
@@ -1380,19 +1382,19 @@ input, textarea {
   line-height: 1;
 }
 
-.instr-save-btn:hover { border-color: var(--accent); color: var(--accent); }
-.instr-cancel-btn:hover { border-color: #e63946; color: #e63946; }
-.instr-save-btn:disabled { opacity: 0.3; cursor: default; }
+.personality-save-btn:hover { border-color: var(--accent); color: var(--accent); }
+.personality-cancel-btn:hover { border-color: #e63946; color: #e63946; }
+.personality-save-btn:disabled { opacity: 0.3; cursor: default; }
 
-.instr-turn {
+.personality-turn {
   position: relative;
 }
 
-.instr-bubble {
+.personality-bubble {
   position: relative;
 }
 
-.instr-bubble .instr-edit-icon {
+.personality-bubble .personality-edit-icon {
   position: absolute;
   top: 0.5rem;
   right: 0.5rem;
@@ -1409,43 +1411,41 @@ input, textarea {
   align-items: center;
 }
 
-.instr-turn:hover .instr-edit-icon {
+.personality-turn:hover .personality-edit-icon {
   opacity: 1;
 }
 
-.instr-bubble .instr-edit-icon:hover {
+.personality-bubble .personality-edit-icon:hover {
   color: var(--accent);
   border-color: var(--accent);
 }
 
-.instr-body {
+.personality-body {
   white-space: pre-wrap;
   font-family: monospace;
   font-size: 0.85rem;
   line-height: 1.5;
 }
 
-.instr-inline-textarea {
-  width: 100%;
-  min-height: 200px;
-  resize: none;
-  overflow: hidden;
-  font-family: monospace;
-  font-size: 0.85rem;
-  padding: 0;
-  border: none;
-  background: transparent;
-  color: var(--fg);
-  line-height: 1.5;
+.personality-body[contenteditable="true"] {
   outline: none;
 }
 
-.instr-turn.instr-editing .msg-bubble {
+.personality-turn.personality-editing .msg-bubble {
   outline: 1px solid var(--accent);
   outline-offset: 0;
 }
 
-.instr-projects {
+.personality-meta .msg-time {
+  margin-left: 0;
+}
+
+.personality-turn:hover .revision-nav,
+.personality-meta:hover .revision-nav {
+  opacity: 1;
+}
+
+.revision-projects {
   margin-top: 0.75rem;
   display: flex;
   flex-wrap: wrap;
@@ -1454,11 +1454,11 @@ input, textarea {
   font-size: 0.8rem;
 }
 
-.instr-projects-label {
+.revision-projects-label {
   color: var(--muted);
 }
 
-.instr-project-link {
+.revision-project-link {
   color: var(--accent);
   text-decoration: none;
   padding: 0.1rem 0.4rem;
@@ -1467,7 +1467,7 @@ input, textarea {
   font-size: 0.75rem;
 }
 
-.instr-project-link:hover {
+.revision-project-link:hover {
   border-color: var(--accent);
 }
 
