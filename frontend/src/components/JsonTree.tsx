@@ -33,7 +33,7 @@ function JsonNode({ value, depth, defaultExpanded }: { value: unknown; depth: nu
   }
   if (Array.isArray(value)) {
     if (value.length === 0) return <span>[]</span>;
-    return <Collapsible open={depth < defaultExpanded} openBracket="[" closeBracket="]" count={value.length}>
+    return <Collapsible open={true} openBracket="[" closeBracket="]" count={value.length}>
       {value.map((item, i) => (
         <div key={i} className="json-line">
           <JsonNode value={item} depth={depth + 1} defaultExpanded={defaultExpanded} />
@@ -43,9 +43,10 @@ function JsonNode({ value, depth, defaultExpanded }: { value: unknown; depth: nu
     </Collapsible>;
   }
   if (typeof value === 'object') {
-    const entries = Object.entries(value as Record<string, unknown>);
+    const objectValue = value as Record<string, unknown>;
+    const entries = Object.entries(objectValue);
     if (entries.length === 0) return <span>{'{}'}</span>;
-    return <Collapsible open={depth < defaultExpanded} openBracket="{" closeBracket="}" count={entries.length}>
+    return <Collapsible open={depth < defaultExpanded} openBracket="{" closeBracket="}" count={entries.length} summary={objectSummary(objectValue)}>
       {entries.map(([k, v], i) => (
         <div key={k} className="json-line">
           <span className="json-key">"{k}"</span>: <JsonNode value={v} depth={depth + 1} defaultExpanded={defaultExpanded} />
@@ -55,6 +56,20 @@ function JsonNode({ value, depth, defaultExpanded }: { value: unknown; depth: nu
     </Collapsible>;
   }
   return <span>{String(value)}</span>;
+}
+
+function objectSummary(value: Record<string, unknown>): string | undefined {
+  const type = typeof value.type === 'string' ? value.type : undefined;
+  const skill = typeof value.skill === 'string' ? value.skill : undefined;
+  const prompt = typeof value.prompt === 'string' ? value.prompt : undefined;
+  if (!type && !prompt) return undefined;
+
+  const label = [type, skill ? `/${skill}` : undefined].filter(Boolean).join(' ');
+  if (!prompt) return label || undefined;
+
+  const normalizedPrompt = prompt.replace(/\s+/g, ' ').trim();
+  const shortened = normalizedPrompt.length > 80 ? `${normalizedPrompt.slice(0, 77)}...` : normalizedPrompt;
+  return `${label || 'prompt'}: "${shortened}"`;
 }
 
 function LongString({ value }: { value: string }) {
@@ -75,12 +90,12 @@ function LongString({ value }: { value: string }) {
   );
 }
 
-function Collapsible({ open, openBracket, closeBracket, count, children }: { open: boolean; openBracket: string; closeBracket: string; count: number; children: React.ReactNode }) {
+function Collapsible({ open, openBracket, closeBracket, count, summary, children }: { open: boolean; openBracket: string; closeBracket: string; count: number; summary?: string; children: React.ReactNode }) {
   const [expanded, setExpanded] = useState(open);
   if (!expanded) {
     return (
       <span>
-        <span className="json-toggle" onClick={() => setExpanded(true)}>+</span> {openBracket} <span className="json-hint">{count}</span> {closeBracket}
+        <span className="json-toggle" onClick={() => setExpanded(true)}>+</span> {openBracket} <span className="json-hint">{summary || count}</span> {closeBracket}
       </span>
     );
   }
