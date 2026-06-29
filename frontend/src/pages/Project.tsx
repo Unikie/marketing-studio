@@ -6,57 +6,15 @@ import DebugView from '../components/DebugView';
 import PromptBox, { type PromptHandle } from '../components/Prompt';
 import { formatMessageDate } from '../date';
 
-// --- Tree utilities for prompt_context-based branching ---
-
-// Get the prompt-ref parent of a top-level prompt
-function getParentId(p: PromptData): string | null {
-  const ref = (p.context || []).find(c => c.type === 'prompt');
-  return ref ? ref.id : null;
-}
-
-// Build children map: parentId -> children (siblings)
-function buildChildrenMap(topLevel: PromptData[]): Map<string | null, PromptData[]> {
-  const map = new Map<string | null, PromptData[]>();
-  for (const p of topLevel) {
-    const parentId = getParentId(p);
-    if (!map.has(parentId)) map.set(parentId, []);
-    map.get(parentId)!.push(p);
+function findPromptById(tree: PromptData[], promptId: string): PromptData | undefined {
+  for (const prompt of tree) {
+    if (prompt.id === promptId) return prompt;
+    const step = prompt.steps ? findPromptById(prompt.steps, promptId) : undefined;
+    if (step) return step;
+    const branch = prompt.branch ? findPromptById(prompt.branch, promptId) : undefined;
+    if (branch) return branch;
   }
-  return map;
-}
-
-// Walk from a leaf up to root
-function getPathToRoot(topLevel: PromptData[], leafId: string): PromptData[] {
-  const byId = new Map(topLevel.map(p => [p.id, p]));
-  const path: PromptData[] = [];
-  let current = byId.get(leafId);
-  while (current) {
-    path.unshift(current);
-    const parentId = getParentId(current);
-    current = parentId ? byId.get(parentId) : undefined;
-  }
-  return path;
-}
-
-function getNewestPromptId(topLevel: PromptData[]): string | null {
-  if (topLevel.length === 0) return null;
-  return [...topLevel].sort((a, b) => b.created_at.localeCompare(a.created_at))[0].id;
-}
-
-function findNewestDescendant(childrenMap: Map<string | null, PromptData[]>, start: PromptData): string {
-  let newest = start;
-  const stack = [start.id];
-
-  while (stack.length > 0) {
-    const currentId = stack.pop()!;
-    const children = childrenMap.get(currentId) || [];
-    for (const child of children) {
-      if (child.created_at.localeCompare(newest.created_at) > 0) newest = child;
-      stack.push(child.id);
-    }
-  }
-
-  return newest.id;
+  return undefined;
 }
 
 function formatPipelineStage(stage: PromptData): string {
@@ -76,10 +34,9 @@ function formatPipelineStage(stage: PromptData): string {
 
 type PipelineProgress = { label: string; error?: string };
 
-function getPipelineProgress(parent: PromptData, prompts: PromptData[]): PipelineProgress | null {
+function getPipelineProgress(parent: PromptData): PipelineProgress | null {
   if (parent.type !== 'pipeline') return null;
-  const children = prompts
-    .filter(child => child.pipeline_id === parent.id)
+  const children = (parent.steps || [])
     .sort((a, b) => a.created_at.localeCompare(b.created_at));
   const latestChildren = [...children].reverse();
 
@@ -151,21 +108,15 @@ export default function Project() {
     }
   }, [id]);
 
-  async function loadData() {
+  async function loadData(promptId: string | null = activeLeafId) {
     try {
-      const [proj, p] = await Promise.all([
+      const [proj, tree] = await Promise.all([
         api.getProject(id!),
-        api.getPrompts(id!),
+        api.getPromptTree(id!, promptId),
       ]);
       setProject(proj);
-      setPrompts(p);
-
-      // Set active leaf to newest branch if not set
-      const topLevel = p.filter(pr => pr.pipeline_id === null);
-      setActiveLeafId(prev => {
-        if (prev && topLevel.find(pr => pr.id === prev)) return prev;
-        return getNewestPromptId(topLevel);
-      });
+      setPrompts(tree);
+      setActiveLeafId(tree.length > 0 ? tree[tree.length - 1].id : null);
     } catch (err) {
       console.error('Failed to load:', err);
     } finally {
@@ -193,7 +144,7 @@ export default function Project() {
       }
     }
     if (lastEvent.type === 'prompt-chunk') {
-      const eventPrompt = promptsRef.current.find(p => p.id === lastEvent.promptId);
+      const eventPrompt = findPromptById(promptsRef.current, lastEvent.promptId);
       const isFinalPipelineChunk = lastEvent.pipelineId || (eventPrompt?.pipeline_id && eventPrompt.type === 'llm' && !eventPrompt.skill);
       if (!eventPrompt?.pipeline_id || isFinalPipelineChunk) {
         setStreamingPromptId(lastEvent.pipelineId || eventPrompt?.pipeline_id || lastEvent.promptId);
@@ -235,10 +186,8 @@ export default function Project() {
     if (isNearBottomRef.current) endRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [prompts, streamContent, activeLeafId]);
 
-  // Top-level prompts and tree structures
-  const topLevelPrompts = prompts.filter(p => p.pipeline_id === null);
-  const childrenMap = buildChildrenMap(topLevelPrompts);
-  const currentPath = activeLeafId ? getPathToRoot(topLevelPrompts, activeLeafId) : [];
+  // Current branch path from the backend content tree.
+  const currentPath = prompts;
 
   // Track which user prompt is currently visible
   useEffect(() => {
@@ -268,9 +217,8 @@ export default function Project() {
   // Get the "answer" for a top-level prompt
   function getResponse(p: PromptData): string {
     if (p.type === 'pipeline') {
-      const children = prompts.filter(c => c.pipeline_id === p.id && c.type === 'llm' && c.status === 'completed');
-      if (children.length === 0) return '';
-      return children[children.length - 1].response;
+      const completedLlms = (p.steps || []).filter(step => step.type === 'llm' && step.status === 'completed');
+      return completedLlms.length > 0 ? completedLlms[completedLlms.length - 1].response : '';
     }
     return p.response;
   }
@@ -296,8 +244,8 @@ export default function Project() {
         newPrompt = await api.createPrompt(id, text, fileIds, activeLeafId);
       }
 
-      setPrompts(prev => [...prev, newPrompt]);
       setActiveLeafId(newPrompt.id);
+      await loadData(newPrompt.id);
       setStreamingPromptId(newPrompt.id);
       setStreamContent('');
     } catch (err) {
@@ -318,8 +266,8 @@ export default function Project() {
     setSending(true);
     try {
       const newPrompt = await api.retryPrompt(id, p.id);
-      setPrompts(prev => [...prev, newPrompt]);
       setActiveLeafId(newPrompt.id);
+      await loadData(newPrompt.id);
       setStreamingPromptId(newPrompt.id);
       setStreamContent('');
     } catch (err) {
@@ -339,15 +287,15 @@ export default function Project() {
   }
 
   function switchBranch(p: PromptData, direction: number) {
-    const parentId = getParentId(p);
-    const siblings = topLevelPrompts.filter(s => getParentId(s) === parentId);
+    const siblings = [p, ...(p.branch || [])];
     siblings.sort((a, b) => a.created_at.localeCompare(b.created_at));
     const idx = siblings.findIndex(s => s.id === p.id);
     const newIdx = idx + direction;
     if (newIdx < 0 || newIdx >= siblings.length) return;
     const newSibling = siblings[newIdx];
-    const deepest = findNewestDescendant(childrenMap, newSibling);
+    const deepest = newSibling.latest_descendant_id || newSibling.id;
     setActiveLeafId(deepest);
+    loadData(deepest);
   }
 
   if (loading) return <div>Loading...</div>;
@@ -388,7 +336,7 @@ export default function Project() {
       </div>
 
       {viewMode === 'debug' ? (
-        <DebugView prompts={prompts} />
+        <DebugView projectId={id!} refreshSignal={lastEvent} />
       ) : (
       <div className="history-wrapper">
       <div className="history-messages" ref={scrollContainerRef} onScroll={handleScroll}>
@@ -397,8 +345,7 @@ export default function Project() {
         )}
 
         {currentPath.map(p => {
-          const parentId = getParentId(p);
-          const siblings = topLevelPrompts.filter(s => getParentId(s) === parentId);
+          const siblings = [p, ...(p.branch || [])];
           siblings.sort((a, b) => a.created_at.localeCompare(b.created_at));
           const sibIdx = siblings.findIndex(s => s.id === p.id);
           const hasBranches = siblings.length > 1;
@@ -406,8 +353,8 @@ export default function Project() {
 
           const isStreaming = p.id === streamingPromptId;
           const response = isStreaming ? streamContent : getResponse(p);
-          const fileRefs = (p.context || []).filter(c => c.type === 'file');
-          const pipelineProgress = pipelineStages[p.id] || getPipelineProgress(p, prompts);
+          const fileRefs = p.files || [];
+          const pipelineProgress = pipelineStages[p.id] || getPipelineProgress(p);
 
           return (
             <div key={p.id} className="msg-turn" data-prompt-id={p.id}>

@@ -1,50 +1,15 @@
 import { Router, Request, Response } from 'express';
 import { v4 as uuidv4 } from 'uuid';
 import type { Knex } from 'knex';
+import { buildDebugTree } from '../services/debugTree';
+import { getContentTree } from '../services/content';
 
 const router = Router({ mergeParams: true });
 
-// Helper: build clean prompt response object
-async function cleanPrompt(db: Knex, promptId: string): Promise<object> {
-  const p = await db('prompts').where('id', promptId).first();
-  if (!p) return {};
-
-  const rawContext = await db('prompt_context').select('ref_type', 'ref_id').where('prompt_id', promptId);
-  const context = [];
-  for (const ref of rawContext) {
-    if (ref.ref_type === 'file') {
-      const file = await db('files').select('name').where('id', ref.ref_id).first();
-      context.push({ type: 'file', name: file?.name || 'unknown' });
-    } else {
-      const rp = await db('prompts').select('type', 'prompt', 'response', 'status').where('id', ref.ref_id).first();
-      if (rp) {
-        const entry: any = { type: 'prompt', id: ref.ref_id, prompt_type: rp.type, status: rp.status };
-        if (rp.prompt) entry.prompt = rp.prompt;
-        if (rp.response) entry.response = rp.response;
-        context.push(entry);
-      } else {
-        context.push({ type: 'prompt', id: ref.ref_id });
-      }
-    }
-  }
-
-  const skill = p.skill_id ? (await db('skills').select('name').where('id', p.skill_id).first())?.name || null : null;
-
-  const clean: any = {
-    id: p.id,
-    pipeline_id: p.pipeline_id || null,
-    type: p.type,
-    prompt: p.prompt,
-    response: p.response,
-    status: p.status,
-    context,
-    created_at: p.created_at,
-    updated_at: p.updated_at,
-  };
-  if (p.error) clean.error = p.error;
-  if (skill) clean.skill = skill;
-  if (p.messages) clean.messages = JSON.parse(p.messages);
-  return clean;
+// Helper: return the prompt node from the shared content tree.
+async function cleanPrompt(db: Knex, projectId: string, promptId: string): Promise<object> {
+  const tree = await getContentTree(db, { projectId, promptId });
+  return tree[tree.length - 1] || {};
 }
 
 // GET all prompts for a project
@@ -52,48 +17,40 @@ router.get('/', async (req: Request, res: Response) => {
   const db = req.app.locals.db as Knex;
   const projectId = req.params.projectId as string;
 
-  const prompts = await db('prompts').where('project_id', projectId).orderBy('created_at');
+  const tree = await getContentTree(db, { projectId });
+  res.json(tree);
+});
 
-  const result = [];
-  for (const p of prompts) {
-    const rawContext = await db('prompt_context').select('ref_type', 'ref_id').where('prompt_id', p.id);
-    const context = [];
-    for (const ref of rawContext) {
-      if (ref.ref_type === 'file') {
-        const file = await db('files').select('name').where('id', ref.ref_id).first();
-        context.push({ type: 'file', name: file?.name || 'unknown' });
-      } else {
-        const rp = await db('prompts').select('type', 'prompt', 'response', 'status').where('id', ref.ref_id).first();
-        if (rp) {
-          const entry: any = { type: 'prompt', id: ref.ref_id, prompt_type: rp.type, status: rp.status };
-          if (rp.prompt) entry.prompt = rp.prompt;
-          if (rp.response) entry.response = rp.response;
-          context.push(entry);
-        } else {
-          context.push({ type: 'prompt', id: ref.ref_id });
-        }
-      }
-    }
+// GET backend-built debug tree for a project
+router.get('/debug-tree', async (req: Request, res: Response) => {
+  try {
+    const db = req.app.locals.db as Knex;
+    const projectId = req.params.projectId as string;
 
-    const skill = p.skill_id ? (await db('skills').select('name').where('id', p.skill_id).first())?.name || null : null;
+    const project = await db('projects').where('id', projectId).first();
+    if (!project) { res.status(404).json({ error: 'Project not found' }); return; }
 
-    const clean: any = {
-      id: p.id,
-      pipeline_id: p.pipeline_id || null,
-      type: p.type,
-      prompt: p.prompt,
-      response: p.response,
-      status: p.status,
-      context,
-      created_at: p.created_at,
-      updated_at: p.updated_at,
-    };
-    if (p.error) clean.error = p.error;
-    if (skill) clean.skill = skill;
-    result.push(clean);
+    const tree = await buildDebugTree(db, projectId);
+    res.json(tree);
+  } catch (err) {
+    console.error('Failed to build debug tree:', err);
+    res.status(500).json({ error: 'Failed to build debug tree' });
   }
+});
 
-  res.json(result);
+// GET backend-built content tree for history display
+router.get('/tree', async (req: Request, res: Response) => {
+  const db = req.app.locals.db as Knex;
+  const projectId = req.params.projectId as string;
+  const promptId = typeof req.query.prompt_id === 'string' && req.query.prompt_id.trim()
+    ? req.query.prompt_id.trim()
+    : undefined;
+
+  const project = await db('projects').where('id', projectId).first();
+  if (!project) { res.status(404).json({ error: 'Project not found' }); return; }
+
+  const tree = await getContentTree(db, { projectId, promptId });
+  res.json(tree);
 });
 
 // CREATE a new prompt
@@ -144,7 +101,7 @@ router.post('/', async (req: Request, res: Response) => {
   // Clear draft for this project
   await db('drafts').where('key', projectId).del();
 
-  const created = await cleanPrompt(db, promptId);
+  const created = await cleanPrompt(db, projectId, promptId);
   res.status(201).json(created);
 });
 
@@ -189,7 +146,7 @@ router.post('/:promptId/retry', async (req: Request, res: Response) => {
     }
   }
 
-  const created = await cleanPrompt(db, newId);
+  const created = await cleanPrompt(db, projectId, newId);
   res.status(201).json(created);
 });
 

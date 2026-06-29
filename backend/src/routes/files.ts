@@ -2,6 +2,7 @@ import { Router, Request, Response } from 'express';
 import multer from 'multer';
 import path from 'path';
 import fs from 'fs';
+import { createHash } from 'crypto';
 import { v4 as uuidv4 } from 'uuid';
 import type { Knex } from 'knex';
 
@@ -44,7 +45,7 @@ router.get('/', async (req: Request, res: Response) => {
   const db = req.app.locals.db as Knex;
   const projectId = req.params.projectId as string;
   const files = await db('files')
-    .select('id', 'filename', 'name', 'analysis', 'created_at')
+    .select('id', 'filename', 'name', 'sha256', 'analysis', 'created_at')
     .where('project_id', projectId)
     .orderBy('created_at');
   res.json(files);
@@ -64,8 +65,9 @@ router.post('/', upload.array('files', 10), async (req: Request, res: Response) 
   const results = [];
   for (const file of files) {
     const fileId = uuidv4();
-    await db('files').insert({ id: fileId, project_id: projectId, filename: file.filename, name: file.originalname });
-    results.push({ id: fileId, filename: file.filename, name: file.originalname });
+    const sha256 = createHash('sha256').update(fs.readFileSync(file.path)).digest('hex');
+    await db('files').insert({ id: fileId, project_id: projectId, filename: file.filename, name: file.originalname, sha256 });
+    results.push({ id: fileId, filename: file.filename, name: file.originalname, sha256 });
   }
 
   res.status(201).json(results);

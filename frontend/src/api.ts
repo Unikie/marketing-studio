@@ -30,10 +30,16 @@ export interface Prompt {
   type: string;
   prompt: string;
   response: string;
+  messages?: unknown;
   skill?: string;
+  skill_id?: string | null;
   status: string;
   error?: string;
-  context: { type: string; id: string; name?: string }[];
+  context?: { type: string; id: string; name?: string }[];
+  files?: { id: string; name: string }[];
+  steps?: Prompt[];
+  branch?: Prompt[];
+  latest_descendant_id?: string;
   created_at: string;
   updated_at: string;
 }
@@ -107,7 +113,12 @@ export const api = {
   },
 
   // Prompts API
-  getPrompts: (projectId: string): Promise<Prompt[]> => request(`/api/projects/${projectId}/prompts`),
+  getPromptTree: (projectId: string, promptId?: string | null): Promise<Prompt[]> => {
+    const query = promptId ? `?prompt_id=${encodeURIComponent(promptId)}` : '';
+    return request(`/api/projects/${projectId}/prompts/tree${query}`);
+  },
+
+  getDebugTree: (projectId: string): Promise<unknown> => request(`/api/projects/${projectId}/prompts/debug-tree`),
 
   createPrompt: (projectId: string, prompt: string, fileIds: string[], parentPromptId?: string | null): Promise<Prompt> =>
     request(`/api/projects/${projectId}/prompts`, {

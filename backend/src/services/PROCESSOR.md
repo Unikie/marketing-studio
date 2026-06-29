@@ -19,15 +19,17 @@ status = 'pending' and pipeline_id is null
 - `processPrompt(...)` -> file refs from `prompt_context` -> file rows from `files`.
 - `parsePrompt(...)` -> `/skill` tokens -> matching rows from `skills`.
 - `getPersonality(...)` -> latest row from `personality`.
-- `getProjectContext(...)` -> previous completed top-level rows from `prompts`.
+- `content.getContentTree(...)` -> current branch path from prompt-parent refs.
 - web process -> does not pass a prepared context object.
 
 ## context construction
 
-- `getProjectContext(db, projectId, beforeDate)` -> completed top-level prompts before `beforeDate`.
-- previous pipeline prompt -> latest completed child response becomes the pipeline response.
-- `unwindContext(db, promptId)` -> follows `prompt_context` rows where `ref_type = prompt`.
-- `unwindContext(...)` -> recursively appends referenced context first -> appends completed referenced prompt as `{ type, prompt, response }`.
+- `content.getContentTree(db, { projectId, promptId })` -> current top-level branch path.
+- pipeline rows are wrappers only; they are not emitted as query context prompt/response messages.
+- `content.getContentTree(...)` attaches pipeline child prompts as `steps`.
+- `content.contentTreeToContext(...)` -> prompt/response entries from real prompt nodes in that branch path and pipeline steps.
+- `content.getPromptContext(...)` -> the single context builder used by processor and debug output.
+- context entries are deduplicated in `content.contentTreeToContext(...)`.
 
 pipeline step chaining:
 
@@ -43,7 +45,9 @@ condition:
 files.length === 0 && skills.length === 0
 ```
 
-- personality + project context + user text -> `buildMessages(...)`.
+- personality + branch context + user text -> `content.buildQuery(...)`.
+- context is built by `content.getPromptContext(...)`.
+- LLM query roles: personality is the only `system` message; context prompt/response entries become prior `user`/`assistant` messages; current prompt is the final `user` message.
 - streamed LLM output -> top-level prompt `response`.
 - LLM messages -> top-level prompt `messages`.
 - top-level prompt -> `status = completed`.
@@ -70,7 +74,7 @@ files.length > 0 || skills.length > 0
 2. skill tool argument generation, for skills with `tool_name`.
    - pyworker tool schema -> arg-generation LLM prompt.
    - insert child prompt: `type = llm`.
-   - project context + `unwindContext(...)` -> LLM messages.
+   - `content.getPromptContext(...)` -> LLM query.
    - generated args or error -> child `response`.
 
 3. skill tool execution, after successful arg generation.
@@ -80,13 +84,13 @@ files.length > 0 || skills.length > 0
 
 4. skill LLM, once per matched skill.
    - insert child prompt: `type = llm`, `prompt = skill.system_prompt`.
-   - project context + `unwindContext(...)` entries marked `_current: true` -> LLM messages.
-   - LLM messages -> child `messages`; output -> child `response`.
+   - `content.getPromptContext(...)` -> LLM query.
+   - LLM query -> child `messages`; output -> child `response`.
 
 5. final LLM.
    - insert child prompt: `type = llm`, `prompt = original user prompt`.
-   - project context + `unwindContext(...)` entries marked `_current: true` -> LLM messages.
-   - LLM messages -> child `messages`; output -> child `response`.
+   - `content.getPromptContext(...)` -> LLM query.
+   - LLM query -> child `messages`; output -> child `response`.
    - top-level pipeline prompt -> `status = completed`.
 
 ## status and events

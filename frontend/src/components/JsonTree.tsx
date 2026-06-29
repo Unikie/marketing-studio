@@ -19,13 +19,6 @@ function JsonNode({ value, depth, defaultExpanded }: { value: unknown; depth: nu
   if (typeof value === 'boolean') return <span className="json-bool">{String(value)}</span>;
   if (typeof value === 'number') return <span className="json-number">{value}</span>;
   if (typeof value === 'string') {
-    // Try parsing string as JSON — if it's an embedded object/array, render as such
-    try {
-      const parsed = JSON.parse(value);
-      if (typeof parsed === 'object' && parsed !== null) {
-        return <JsonNode value={parsed} depth={depth} defaultExpanded={defaultExpanded} />;
-      }
-    } catch { /* not JSON, render as string */ }
     if (value.length > 80) {
       return <LongString value={value} />;
     }
@@ -59,6 +52,14 @@ function JsonNode({ value, depth, defaultExpanded }: { value: unknown; depth: nu
 }
 
 function objectSummary(value: Record<string, unknown>): string | undefined {
+  const role = typeof value.role === 'string' ? value.role : undefined;
+  const content = typeof value.content === 'string' ? value.content : undefined;
+  if (role && content !== undefined) {
+    const normalizedContent = content.replace(/\s+/g, ' ').trim();
+    const shortened = normalizedContent.length > 44 ? `${normalizedContent.slice(0, 41)}...` : normalizedContent;
+    return `${role}: "${shortened}"`;
+  }
+
   const type = typeof value.type === 'string' ? value.type : undefined;
   const skill = typeof value.skill === 'string' ? value.skill : undefined;
   const prompt = typeof value.prompt === 'string' ? value.prompt : undefined;
