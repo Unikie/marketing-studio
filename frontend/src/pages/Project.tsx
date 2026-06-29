@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { useParams, useLocation } from 'react-router-dom';
+import { useParams, useLocation, useNavigate } from 'react-router-dom';
 import { api, type Project as ProjectData, Prompt as PromptData } from '../api';
 import { useSSE } from '../hooks/useSSE';
 import DebugView from '../components/DebugView';
@@ -38,18 +38,25 @@ function getPathToRoot(topLevel: PromptData[], leafId: string): PromptData[] {
   return path;
 }
 
-// Find the deepest leaf following the "newest" branch at each fork
-function findNewestLeaf(topLevel: PromptData[], childrenMap: Map<string | null, PromptData[]>, startId?: string | null): string | null {
+function getNewestPromptId(topLevel: PromptData[]): string | null {
   if (topLevel.length === 0) return null;
-  let currentId = startId ?? null;
-  // eslint-disable-next-line no-constant-condition
-  while (true) {
-    const children = childrenMap.get(currentId);
-    if (!children || children.length === 0) return currentId;
-    // Pick the child that has the newest descendant (approximated by latest created_at in subtree)
-    children.sort((a, b) => b.created_at.localeCompare(a.created_at));
-    currentId = children[0].id;
+  return [...topLevel].sort((a, b) => b.created_at.localeCompare(a.created_at))[0].id;
+}
+
+function findNewestDescendant(childrenMap: Map<string | null, PromptData[]>, start: PromptData): string {
+  let newest = start;
+  const stack = [start.id];
+
+  while (stack.length > 0) {
+    const currentId = stack.pop()!;
+    const children = childrenMap.get(currentId) || [];
+    for (const child of children) {
+      if (child.created_at.localeCompare(newest.created_at) > 0) newest = child;
+      stack.push(child.id);
+    }
   }
+
+  return newest.id;
 }
 
 function formatPipelineStage(stage: PromptData): string {
@@ -118,6 +125,7 @@ export default function Project() {
   const promptsRef = useRef<PromptData[]>([]);
   const pipelineClearTimersRef = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
   const location = useLocation();
+  const navigate = useNavigate();
   const incomingHandled = useRef(false);
 
   useEffect(() => { promptsRef.current = prompts; }, [prompts]);
@@ -135,6 +143,7 @@ export default function Project() {
     if (state?.prompt && !incomingHandled.current) {
       // Fresh project — only fetch project metadata, skip history
       incomingHandled.current = true;
+      navigate(location.pathname, { replace: true, state: null });
       api.getProject(id).then(setProject).catch(console.error).finally(() => setLoading(false));
       handleSend(state.prompt, state.files || []);
     } else {
@@ -153,10 +162,9 @@ export default function Project() {
 
       // Set active leaf to newest branch if not set
       const topLevel = p.filter(pr => pr.pipeline_id === null);
-      const childrenMap = buildChildrenMap(topLevel);
       setActiveLeafId(prev => {
         if (prev && topLevel.find(pr => pr.id === prev)) return prev;
-        return findNewestLeaf(topLevel, childrenMap);
+        return getNewestPromptId(topLevel);
       });
     } catch (err) {
       console.error('Failed to load:', err);
@@ -285,7 +293,7 @@ export default function Project() {
         newPrompt = await api.retryPrompt(id, editingPromptId, text, fileIds.length > 0 ? fileIds : undefined);
         setEditingPromptId(null);
       } else {
-        newPrompt = await api.createPrompt(id, text, fileIds);
+        newPrompt = await api.createPrompt(id, text, fileIds, activeLeafId);
       }
 
       setPrompts(prev => [...prev, newPrompt]);
@@ -338,7 +346,7 @@ export default function Project() {
     const newIdx = idx + direction;
     if (newIdx < 0 || newIdx >= siblings.length) return;
     const newSibling = siblings[newIdx];
-    const deepest = findNewestLeaf(topLevelPrompts, childrenMap, newSibling.id);
+    const deepest = findNewestDescendant(childrenMap, newSibling);
     setActiveLeafId(deepest);
   }
 

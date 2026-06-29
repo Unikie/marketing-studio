@@ -109,11 +109,11 @@ export const api = {
   // Prompts API
   getPrompts: (projectId: string): Promise<Prompt[]> => request(`/api/projects/${projectId}/prompts`),
 
-  createPrompt: (projectId: string, prompt: string, fileIds: string[]): Promise<Prompt> =>
+  createPrompt: (projectId: string, prompt: string, fileIds: string[], parentPromptId?: string | null): Promise<Prompt> =>
     request(`/api/projects/${projectId}/prompts`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ prompt, file_ids: fileIds }),
+      body: JSON.stringify({ prompt, file_ids: fileIds, parent_prompt_id: parentPromptId || null }),
     }),
 
   stopPrompt: (projectId: string, promptId: string): Promise<{ ok: boolean }> =>

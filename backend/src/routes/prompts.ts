@@ -106,10 +106,28 @@ router.post('/', async (req: Request, res: Response) => {
 
   const prompt = (req.body.prompt || '').trim();
   const fileIds: string[] = req.body.file_ids || [];
+  const parentPromptId = typeof req.body.parent_prompt_id === 'string' && req.body.parent_prompt_id.trim()
+    ? req.body.parent_prompt_id.trim()
+    : null;
 
   if (!prompt) {
     res.status(400).json({ error: 'Prompt text is required' });
     return;
+  }
+
+  let parentPrompt: { id: string } | null = null;
+
+  if (parentPromptId) {
+    parentPrompt = await db('prompts')
+      .select('id')
+      .where('id', parentPromptId)
+      .where('project_id', projectId)
+      .whereNull('pipeline_id')
+      .first();
+    if (!parentPrompt) {
+      res.status(400).json({ error: 'parent_prompt_id must reference a top-level prompt in this project' });
+      return;
+    }
   }
 
   const promptId = uuidv4();
@@ -119,16 +137,8 @@ router.post('/', async (req: Request, res: Response) => {
     await db('prompt_context').insert({ prompt_id: promptId, ref_type: 'file', ref_id: fileId });
   }
 
-  const prevPrompt = await db('prompts')
-    .select('id')
-    .where('project_id', projectId)
-    .whereNull('pipeline_id')
-    .where('status', 'completed')
-    .whereNot('id', promptId)
-    .orderBy('created_at', 'desc')
-    .first();
-  if (prevPrompt) {
-    await db('prompt_context').insert({ prompt_id: promptId, ref_type: 'prompt', ref_id: prevPrompt.id });
+  if (parentPrompt) {
+    await db('prompt_context').insert({ prompt_id: promptId, ref_type: 'prompt', ref_id: parentPrompt.id });
   }
 
   // Clear draft for this project
