@@ -7,19 +7,10 @@ import { getContentTree } from '../services/content';
 const router = Router({ mergeParams: true });
 
 // Helper: return the prompt node from the shared content tree.
-async function cleanPrompt(db: Knex, projectId: string, promptId: string): Promise<object> {
+async function getPromptTreeNode(db: Knex, projectId: string, promptId: string): Promise<object> {
   const tree = await getContentTree(db, { projectId, promptId });
   return tree[tree.length - 1] || {};
 }
-
-// GET all prompts for a project
-router.get('/', async (req: Request, res: Response) => {
-  const db = req.app.locals.db as Knex;
-  const projectId = req.params.projectId as string;
-
-  const tree = await getContentTree(db, { projectId });
-  res.json(tree);
-});
 
 // GET backend-built debug tree for a project
 router.get('/debug-tree', async (req: Request, res: Response) => {
@@ -101,7 +92,7 @@ router.post('/', async (req: Request, res: Response) => {
   // Clear draft for this project
   await db('drafts').where('key', projectId).del();
 
-  const created = await cleanPrompt(db, projectId, promptId);
+  const created = await getPromptTreeNode(db, projectId, promptId);
   res.status(201).json(created);
 });
 
@@ -146,7 +137,7 @@ router.post('/:promptId/retry', async (req: Request, res: Response) => {
     }
   }
 
-  const created = await cleanPrompt(db, projectId, newId);
+  const created = await getPromptTreeNode(db, projectId, newId);
   res.status(201).json(created);
 });
 

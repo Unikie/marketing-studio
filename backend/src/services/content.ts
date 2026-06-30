@@ -27,6 +27,7 @@ export interface ContentPromptNode {
   type: string;
   prompt: string;
   response: string;
+  display_response: string;
   messages: string | null;
   skill_id: string | null;
   error: string | null;
@@ -163,6 +164,7 @@ export async function getContentTree(db: Knex, opts: { projectId: string; prompt
       type: prompt.type,
       prompt: prompt.prompt,
       response: prompt.response,
+      display_response: prompt.response,
       messages: prompt.messages,
       skill_id: prompt.skill_id,
       error: prompt.error,
@@ -181,6 +183,7 @@ export async function getContentTree(db: Knex, opts: { projectId: string; prompt
 
     const steps = getOrderedPipelineSteps(prompt.id);
     if (steps.length > 0) node.steps = await Promise.all(steps.map(step => toNode(step, false)));
+    if (prompt.type === 'pipeline') node.display_response = getPipelineDisplayResponse(node.steps || []);
 
     if (includeBranches) {
       const parentId = parentIdByPromptId.get(prompt.id) || null;
@@ -189,6 +192,11 @@ export async function getContentTree(db: Knex, opts: { projectId: string; prompt
     }
 
     return node;
+  }
+
+  function getPipelineDisplayResponse(steps: ContentPromptNode[]): string {
+    const finalLlm = [...steps].reverse().find(step => step.type === 'llm' && !step.skill_id && step.status === 'completed');
+    return finalLlm?.response || '';
   }
 
   function getLatestDescendant(prompt: PromptRow): PromptRow {

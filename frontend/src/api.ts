@@ -30,12 +30,11 @@ export interface Prompt {
   type: string;
   prompt: string;
   response: string;
-  messages?: unknown;
+  display_response: string;
   skill?: string;
   skill_id?: string | null;
   status: string;
   error?: string;
-  context?: { type: string; id: string; name?: string }[];
   files?: { id: string; name: string }[];
   steps?: Prompt[];
   branch?: Prompt[];

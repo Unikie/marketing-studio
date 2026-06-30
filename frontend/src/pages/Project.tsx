@@ -214,15 +214,6 @@ export default function Project() {
     return () => observer.disconnect();
   }, [currentPath]);
 
-  // Get the "answer" for a top-level prompt
-  function getResponse(p: PromptData): string {
-    if (p.type === 'pipeline') {
-      const completedLlms = (p.steps || []).filter(step => step.type === 'llm' && step.status === 'completed');
-      return completedLlms.length > 0 ? completedLlms[completedLlms.length - 1].response : '';
-    }
-    return p.response;
-  }
-
   async function handleSend(text: string, files: File[]) {
     if (!id) return;
     setSending(true);
@@ -352,7 +343,7 @@ export default function Project() {
           const isLatestBranch = hasBranches && sibIdx === siblings.length - 1;
 
           const isStreaming = p.id === streamingPromptId;
-          const response = isStreaming ? streamContent : getResponse(p);
+          const response = isStreaming ? streamContent : p.display_response;
           const fileRefs = p.files || [];
           const pipelineProgress = pipelineStages[p.id] || getPipelineProgress(p);
 
