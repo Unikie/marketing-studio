@@ -104,11 +104,11 @@ export default function Project() {
       api.getProject(id).then(setProject).catch(console.error).finally(() => setLoading(false));
       handleSend(state.prompt, state.files || []);
     } else {
-      loadData();
+      loadData(null);
     }
   }, [id]);
 
-  async function loadData(promptId: string | null = activeLeafId) {
+  async function loadData(promptId: string | null) {
     try {
       const [proj, tree] = await Promise.all([
         api.getProject(id!),
@@ -167,7 +167,7 @@ export default function Project() {
           }, 1500);
         }
         if (lastEvent.promptId === activeLeafId) {
-          loadData();
+          loadData(activeLeafId);
           setStreamingPromptId(null);
           setStreamContent('');
           setSending(false);

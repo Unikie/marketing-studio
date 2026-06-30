@@ -142,9 +142,10 @@ export async function getContentTree(db: Knex, opts: { projectId: string; prompt
     }
   }
 
+  const latestLeaf = [...topLevel].sort((a, b) => compareCreatedAtDesc(a, b))[0];
   const leaf = opts.promptId
-    ? topLevelById.get(opts.promptId)
-    : [...topLevel].sort((a, b) => compareCreatedAtDesc(a, b))[0];
+    ? topLevelById.get(opts.promptId) || latestLeaf
+    : latestLeaf;
   if (!leaf) return [];
 
   const path: PromptRow[] = [];
