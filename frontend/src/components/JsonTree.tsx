@@ -19,6 +19,10 @@ function JsonNode({ value, depth, defaultExpanded }: { value: unknown; depth: nu
   if (typeof value === 'boolean') return <span className="json-bool">{String(value)}</span>;
   if (typeof value === 'number') return <span className="json-number">{value}</span>;
   if (typeof value === 'string') {
+    const parsed = parseJsonContainer(value);
+    if (parsed !== undefined) {
+      return <JsonNode value={parsed} depth={depth} defaultExpanded={defaultExpanded} />;
+    }
     if (value.length > 80) {
       return <LongString value={value} />;
     }
@@ -49,6 +53,22 @@ function JsonNode({ value, depth, defaultExpanded }: { value: unknown; depth: nu
     </Collapsible>;
   }
   return <span>{String(value)}</span>;
+}
+
+function parseJsonContainer(value: string): unknown | undefined {
+  const trimmed = value.trim();
+  if (!trimmed) return undefined;
+  const startsAsContainer = (trimmed.startsWith('{') && trimmed.endsWith('}')) || (trimmed.startsWith('[') && trimmed.endsWith(']'));
+  if (!startsAsContainer) return undefined;
+
+  try {
+    const parsed = JSON.parse(trimmed);
+    if (parsed !== null && typeof parsed === 'object') return parsed;
+  } catch {
+    return undefined;
+  }
+
+  return undefined;
 }
 
 function objectSummary(value: Record<string, unknown>): string | undefined {
