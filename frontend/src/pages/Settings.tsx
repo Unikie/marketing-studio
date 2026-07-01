@@ -1,16 +1,25 @@
 import { useState, useEffect, useRef } from 'react';
 import { Link } from 'react-router-dom';
-import { api, Skill, Tool, Personality } from '../api';
+import { api, Skill, Tool, Personality, type HealthInfo, type VersionInfo } from '../api';
 import CodeEditor from '../components/CodeEditor';
 import { formatMessageDate } from '../date';
 
 type Tab = 'personality' | 'tools' | 'skills';
+type ServiceKey = 'web' | 'backend' | 'pyworker';
+type ServiceInfo = { version?: VersionInfo; health?: HealthInfo; error?: string };
+
+const webVersion: VersionInfo = { sha: __BUILD_SHA__, time: __BUILD_TIME__ };
 
 export default function Settings() {
   const [tab, setTab] = useState<Tab>('skills');
   const [skills, setSkills] = useState<Skill[]>([]);
   const [tools, setTools] = useState<Tool[]>([]);
   const [loading, setLoading] = useState(true);
+  const [serviceInfo, setServiceInfo] = useState<Record<ServiceKey, ServiceInfo>>({
+    web: { version: webVersion },
+    backend: {},
+    pyworker: {},
+  });
 
   // Personality state
   const [revisions, setRevisions] = useState<Personality[]>([]);
@@ -50,7 +59,7 @@ export default function Settings() {
   const [showNewSkill, setShowNewSkill] = useState(false);
   const [showNewTool, setShowNewTool] = useState(false);
 
-  useEffect(() => { loadAll(); loadRevisions(); }, []);
+  useEffect(() => { loadAll(); loadRevisions(); loadServiceInfo(); }, []);
 
   async function loadAll() {
     try {
@@ -58,6 +67,23 @@ export default function Settings() {
       setSkills(s);
       setTools(t);
     } finally { setLoading(false); }
+  }
+
+  async function loadServiceInfo() {
+    const load = async (service: 'backend' | 'pyworker'): Promise<ServiceInfo> => {
+      try {
+        const [version, health] = await Promise.all([
+          api.getVersion(service),
+          api.getHealth(service),
+        ]);
+        return { version, health };
+      } catch (err) {
+        return { error: err instanceof Error ? err.message : 'unavailable' };
+      }
+    };
+
+    const [backend, pyworker] = await Promise.all([load('backend'), load('pyworker')]);
+    setServiceInfo({ web: { version: webVersion }, backend, pyworker });
   }
 
   // ---- Personality ----
@@ -196,7 +222,8 @@ export default function Settings() {
     await loadAll();
   }
 
-  if (loading) return <div>Loading...</div>;
+  const footer = <VersionFooter info={serviceInfo} />;
+  if (loading) return <div className="settings-page"><div>Loading...</div>{footer}</div>;
 
   return (
     <div className="settings-page">
@@ -385,6 +412,45 @@ export default function Settings() {
           )}
         </div>
       )}
+
+      {footer}
     </div>
   );
+}
+
+function VersionFooter({ info }: { info: Record<ServiceKey, ServiceInfo> }) {
+  return (
+    <div className="version-footer">
+      <VersionText label="web" info={info.web} />
+      {' | '}
+      <VersionText label="api" info={info.backend} />
+      {' | '}
+      <VersionText label="pyworker" info={info.pyworker} />
+    </div>
+  );
+}
+
+function VersionText({ label, info }: { label: string; info: ServiceInfo }) {
+  const className = hasServiceError(info) ? 'version-service error' : 'version-service';
+  return <span className={className} title={versionTitle(label, info)}>{label} {info.version?.sha || '...'}</span>;
+}
+
+function versionTitle(label: string, info: ServiceInfo): string {
+  const isWeb = label === 'web';
+  const parts = [info.version?.time || 'unknown'];
+  if (!isWeb) parts.push(info.health ? formatUptime(info.health.uptime) : 'unknown');
+  return parts.join(' | ');
+}
+
+function hasServiceError(info: ServiceInfo): boolean {
+  return !!info.error || (!!info.health && info.health.status !== 'ok');
+}
+
+function formatUptime(seconds: number): string {
+  if (!Number.isFinite(seconds)) return 'unknown';
+  if (seconds < 60) return `${seconds}s`;
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return `${minutes}m ${seconds % 60}s`;
+  const hours = Math.floor(minutes / 60);
+  return `${hours}h ${minutes % 60}m`;
 }

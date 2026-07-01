@@ -68,6 +68,18 @@ export interface Tool {
   updated_at: string;
 }
 
+export interface HealthInfo {
+  status: string;
+  uptime: number;
+}
+
+export interface VersionInfo {
+  sha: string;
+  time: string;
+}
+
+type ServiceName = 'backend' | 'pyworker';
+
 async function request(path: string, options?: RequestInit) {
   const res = await fetch(`${BASE_URL}${path}`, options);
   if (!res.ok) {
@@ -175,6 +187,10 @@ export const api = {
     request(`/api/personality/versions/${encodeURIComponent(id)}/projects`),
 
   getSSEUrl: (projectId: string): string => `${BASE_URL}/api/events/${projectId}`,
+
+  getHealth: (service?: ServiceName): Promise<HealthInfo> => request(`/api/health${service ? `?${service}` : ''}`),
+
+  getVersion: (service?: ServiceName): Promise<VersionInfo> => request(`/api/version${service ? `?${service}` : ''}`),
 
   // Tools API (pyworker proxy)
   getTools: (): Promise<Tool[]> => request('/api/tools'),

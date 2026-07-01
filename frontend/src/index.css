@@ -1551,3 +1551,17 @@ input, textarea {
   background: var(--accent);
   color: white;
 }
+
+.version-footer {
+  margin-top: 2rem;
+  padding-top: 0.75rem;
+  border-top: 1px solid var(--border);
+  text-align: right;
+  color: var(--muted);
+  font-size: 0.72rem;
+  cursor: default;
+}
+
+.version-service.error {
+  color: #b33232;
+}

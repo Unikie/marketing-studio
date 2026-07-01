@@ -19,7 +19,10 @@ jobs:
       - uses: actions/checkout@v5
       - name: Build image
         run: |
+          BUILD_TIME=$(date -u +%Y-%m-%dT%H:%M:%SZ)
           docker build -t backend:build \
+            --build-arg BUILD_SHA="$GITHUB_SHA" \
+            --build-arg BUILD_TIME="$BUILD_TIME" \
             -f backend/Dockerfile backend/
       - name: Save image
         run: docker save backend:build | gzip > /tmp/backend.tar.gz
@@ -35,7 +38,10 @@ jobs:
       - uses: actions/checkout@v5
       - name: Build image
         run: |
+          BUILD_TIME=$(date -u +%Y-%m-%dT%H:%M:%SZ)
           docker build -t pyworker:build \
+            --build-arg BUILD_SHA="$GITHUB_SHA" \
+            --build-arg BUILD_TIME="$BUILD_TIME" \
             -f pyworker/Dockerfile pyworker/
       - name: Save image
         run: docker save pyworker:build | gzip > /tmp/pyworker.tar.gz
@@ -51,7 +57,10 @@ jobs:
       - uses: actions/checkout@v5
       - name: Build image
         run: |
+          BUILD_TIME=$(date -u +%Y-%m-%dT%H:%M:%SZ)
           docker build -t frontend:build \
+            --build-arg BUILD_SHA="$GITHUB_SHA" \
+            --build-arg BUILD_TIME="$BUILD_TIME" \
             -f frontend/Dockerfile frontend/
       - name: Save image
         run: docker save frontend:build | gzip > /tmp/frontend.tar.gz

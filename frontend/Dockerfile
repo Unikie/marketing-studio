@@ -1,4 +1,10 @@
 FROM node:20-slim AS build
+
+ARG BUILD_SHA=unknown
+ARG BUILD_TIME=unknown
+ENV BUILD_SHA=$BUILD_SHA
+ENV BUILD_TIME=$BUILD_TIME
+
 WORKDIR /app
 COPY package.json package-lock.json ./
 RUN npm ci

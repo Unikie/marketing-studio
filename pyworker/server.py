@@ -8,12 +8,14 @@ import json
 import os
 import sqlite3
 import tempfile
+import time
 import traceback
 
 from flask import Flask, request, jsonify, g
 from sqlalchemy import Column, DateTime, Integer, MetaData, Table, Text, create_engine, delete, func, insert, inspect, select, text, update
 
 app = Flask(__name__)
+STARTED_AT = time.time()
 
 DATABASE_URL = os.environ.get('DATABASE_URL', '')
 DB_PATH = os.environ.get('PYWORKER_DB', os.path.join(os.path.dirname(__file__), 'tools.db'))
@@ -263,8 +265,15 @@ def execute_tool(name):
 
 @app.route('/health', methods=['GET'])
 def health():
-    count = get_db().execute(select(func.count()).select_from(tools_table)).scalar_one()
-    return jsonify({'status': 'ok', 'tools': count})
+    return jsonify({'status': 'ok', 'uptime': int(time.time() - STARTED_AT)})
+
+@app.route('/version', methods=['GET'])
+def version():
+    sha = os.environ.get('BUILD_SHA', 'unknown')
+    return jsonify({
+        'sha': sha[:7] if sha != 'unknown' else sha,
+        'time': os.environ.get('BUILD_TIME', 'unknown'),
+    })
 
 # ---- DB export/import (SQL text dump) ----
 
